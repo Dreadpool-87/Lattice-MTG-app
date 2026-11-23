@@ -12,15 +12,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardEntity::class,
         DeckEntity::class,
         DeckEntryEntity::class,
-        ChatMessageEntity::class
+        ChatMessageEntity::class,
+        VaultCollectionEntry::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class LatticeDatabase : RoomDatabase() {
     abstract fun cardDao(): CardDao
     abstract fun deckDao(): DeckDao
     abstract fun chatDao(): ChatDao
+    abstract fun vaultCollectionDao(): VaultCollectionDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -63,6 +65,23 @@ abstract class LatticeDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS vault_collection_entries (
+                        listName TEXT NOT NULL,
+                        cardId TEXT NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        PRIMARY KEY(listName, cardId),
+                        FOREIGN KEY(cardId) REFERENCES cards(id) ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_vault_collection_entries_cardId ON vault_collection_entries(cardId)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: LatticeDatabase? = null
 
@@ -73,7 +92,7 @@ abstract class LatticeDatabase : RoomDatabase() {
                     LatticeDatabase::class.java,
                     "lattice_mtg_offline.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }

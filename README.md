@@ -9,7 +9,7 @@ Lattice MTG is a native Android companion for Magic: The Gathering. Browse a loc
 ## Features
 
 - **Card Vault.** Search and filter a bundled starter catalog and locally cached cards. Bookmark cards, create custom entries, and fetch additional cards from Scryfall. Inspect card faces, locally cached printings, and rulings when available.
-- **Delver Lens import.** Open **Vault → CSV** to add verified printings to the Vault. Review verified copies, conflicts, and unresolved rows. You can also create a deck from the verified rows.
+- **Delver Lens import.** Open **Vault → Import CSV** and choose **My collection** or **Deck**. Collections are named, expandable lists of owned copies by verified printing. The import review shows conflicts and unresolved rows.
 - **Decks.** Create and edit decks, paste a text decklist, copy a decklist to the clipboard, and view mana curve and synergy summaries.
 - **Tabletop.** Track life totals, poison counters, and commander damage. Use the probability calculator to explore draws.
 - **Lattice Oracle.** Ask Gemini questions through Firebase AI Logic. If you select a deck, the app sends relevant deck information with your question, including up to 35 mainboard entries. Deck statistics and AI replies are aids for reviewing a deck.
@@ -17,7 +17,7 @@ Lattice MTG is a native Android companion for Magic: The Gathering. Browse a loc
 ## Current limitations
 
 - The Vault searches the starter catalog and cards stored on your device. Online Scryfall lookups can expand that cache. In offline-only mode, CSV rows that require an online lookup remain unresolved.
-- CSV quantities appear in the import report and carry over when you create a deck. The Vault stores card records. Use the [web collection importer](https://dreadpool-87.github.io/Lattice-MTG/collection/) for collection-level exports.
+- Collection imports record verified quantities per printing. Replacing an existing collection requires confirmation and a fully verified import. Collections imported before this feature can be reconstructed by re-importing the original CSV. Use the [web collection importer](https://dreadpool-87.github.io/Lattice-MTG/collection/) for collection-level exports.
 - Deck checks cover selected rules. Review format-specific requirements separately, especially when some cards are unresolved or the Oracle chat received only part of the decklist.
 
 ## Build and test

@@ -13,6 +13,7 @@ import com.example.data.local.StarterCards
 import com.example.data.remote.ScryfallCardDto
 import com.example.domain.DeckAnalytics
 import com.example.domain.DelverCsvImporter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -124,6 +125,26 @@ class DataRetentionRegressionTest {
         assertTrue(moveFailed)
         assertEquals(2, decks.getEntry(deckId, card.id, DeckZones.MAINBOARD)?.quantity)
         assertEquals(Int.MAX_VALUE, decks.getEntry(deckId, card.id, DeckZones.SIDEBOARD)?.quantity)
+    }
+
+    @Test
+    fun collectionKeepsIndependentCountsAndOnlyReplacesACompleteSnapshot() = runTest {
+        seedStarterCatalogIfEmpty(database.cardDao())
+        val card = StarterCards.cards.first()
+        val other = StarterCards.cards[1]
+        val collections = database.vaultCollectionDao()
+        assertTrue(collections.saveSnapshot("Reality Fracture", mapOf(card.id to 4, other.id to 2), false, true))
+        assertTrue(collections.saveSnapshot("Binder", mapOf(card.id to 3), false, true))
+        assertFalse(collections.saveSnapshot("reality fracture", mapOf(card.id to 7), false, true))
+        assertFalse(collections.saveSnapshot("Reality Fracture", mapOf(card.id to 7), true, false))
+        assertEquals(6, collections.observeCards().first().filter { it.entry.listName == "Reality Fracture" }.sumOf { it.entry.quantity })
+        assertTrue(collections.saveSnapshot("Reality Fracture", mapOf(card.id to 5), true, true))
+        val entries = collections.observeCards().first().associateBy { it.entry.listName }
+        assertEquals(setOf("Binder", "Reality Fracture"), entries.keys)
+        assertEquals(5, entries.getValue("Reality Fracture").entry.quantity)
+        assertEquals(3, entries.getValue("Binder").entry.quantity)
+        assertEquals(card.id, entries.getValue("Reality Fracture").card.id)
+        assertEquals(2, collections.observeCards().first().size)
     }
 
     @Test

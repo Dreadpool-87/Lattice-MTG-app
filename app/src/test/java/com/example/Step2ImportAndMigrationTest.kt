@@ -365,7 +365,7 @@ class Step2ImportAndMigrationTest {
 
         // Open via Room with MIGRATION_1_2
         val migratedDb = Room.databaseBuilder(context, LatticeDatabase::class.java, dbName)
-            .addMigrations(LatticeDatabase.MIGRATION_1_2)
+            .addMigrations(LatticeDatabase.MIGRATION_1_2, LatticeDatabase.MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
         try {
@@ -374,6 +374,9 @@ class Step2ImportAndMigrationTest {
             assertTrue(solRing!!.isBookmarked)
             assertEquals("1234-5678", solRing.scryfallId)
             assertEquals(CardMetadataStatus.VERIFIED, solRing.metadataStatus)
+            assertTrue(migratedDb.vaultCollectionDao().observeCards().first().isEmpty())
+            assertTrue(migratedDb.vaultCollectionDao().saveSnapshot("Binder", mapOf(solRing.id to 2), false, true))
+            assertEquals(2, migratedDb.vaultCollectionDao().observeCards().first().single().entry.quantity)
 
             val offlineStub = migratedDb.cardDao().getCardById("offline-mystery-card")
             assertNotNull(offlineStub)
@@ -410,7 +413,7 @@ class Step2ImportAndMigrationTest {
             )
             val deckRepo = DeckRepository(db.deckDao(), cardRepo)
             val prefs = PreferencesRepository(context)
-            val viewModel = VaultViewModel(cardRepo, deckRepo, onlineMonitor, prefs)
+            val viewModel = VaultViewModel(cardRepo, deckRepo, onlineMonitor, prefs, db.vaultCollectionDao())
 
             composeRule.setContent {
                 LatticeMtgTheme {
@@ -479,12 +482,17 @@ class Step2ImportAndMigrationTest {
             assertNotNull(report)
             assertEquals(2, report!!.totalVerifiedCopies)
             assertEquals(1, report.conflictRows.size)
+            assertEquals("My cards", report.collectionName)
+            assertEquals(2, db.vaultCollectionDao().observeCards().first().single().entry.quantity)
             composeRule.onNodeWithTag("csv_verified_summary")
                 .performScrollTo()
                 .assertIsDisplayed()
             composeRule.onNodeWithTag("csv_conflicts_section")
                 .performScrollTo()
                 .assertIsDisplayed()
+            composeRule.onNodeWithText("Close").performClick()
+            composeRule.onNodeWithText("My cards").performClick()
+            composeRule.onNodeWithText("×2").assertIsDisplayed()
         } finally {
             db.close()
         }

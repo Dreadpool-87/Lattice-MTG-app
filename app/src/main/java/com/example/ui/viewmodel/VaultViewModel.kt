@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.CardEntity
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
+import com.example.data.local.VaultCollectionCard
+import com.example.data.local.VaultCollectionDao
 import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -54,8 +57,13 @@ class VaultViewModel(
     private val cardRepository: CardRepository,
     private val deckRepository: DeckRepository,
     networkMonitor: NetworkMonitor,
-    preferencesRepository: PreferencesRepository
+    preferencesRepository: PreferencesRepository,
+    private val collectionDao: VaultCollectionDao
 ) : ViewModel() {
+
+    val collections: StateFlow<Map<String, List<VaultCollectionCard>>> = collectionDao.observeCards()
+        .map { rows -> rows.groupBy { it.entry.listName } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private val query = MutableStateFlow("")
     private val selectedColors = MutableStateFlow<Set<String>>(emptySet())
@@ -276,7 +284,9 @@ class VaultViewModel(
     fun importDelverCsv(
         csvContent: String,
         createDeckName: String? = null,
-        deckFormat: String = "Commander"
+        deckFormat: String = "Commander",
+        collectionName: String? = null,
+        replaceCollection: Boolean = false
     ) {
         if (csvContent.isBlank() || !isImportingCsv.compareAndSet(false, true)) return
         csvImportReport.value = null
@@ -290,7 +300,26 @@ class VaultViewModel(
                 val deckId = if (!createDeckName.isNullOrBlank()) {
                     deckRepository.addVerifiedCsvToNewDeck(createDeckName, deckFormat, report)
                 } else null
-                csvImportReport.value = report.copy(deckIdCreated = deckId)
+                val name = collectionName?.trim()?.takeIf { it.isNotEmpty() }
+                val savedCollection = if (name != null && report.verifiedRows.isNotEmpty()) {
+                    val quantities = report.verifiedRows.groupBy { checkNotNull(it.resolvedCard).id }
+                        .mapValues { (_, matches) -> matches.sumOf { it.row.quantity } }
+                    collectionDao.saveSnapshot(
+                        name, quantities, replaceCollection,
+                        complete = report.conflictRows.isEmpty() && report.unresolvedRows.isEmpty()
+                    )
+                } else false
+                csvImportReport.value = report.copy(
+                    deckIdCreated = deckId,
+                    collectionName = name.takeIf { savedCollection },
+                    collectionNotice = if (name != null && !savedCollection) {
+                        when {
+                            report.verifiedRows.isEmpty() -> "No verified cards. The collection was not saved."
+                            !replaceCollection -> "A collection with that name already exists. Confirm replacement or use another name."
+                            else -> "The existing collection was kept because some rows could not be verified."
+                        }
+                    } else null
+                )
                 statusBanner.value = buildString {
                     append("CSV review: ${report.totalVerifiedCopies} verified copies")
                     if (report.conflictRows.isNotEmpty()) append(", ${report.conflictRows.size} mismatches")
@@ -303,7 +332,7 @@ class VaultViewModel(
                 statusBanner.value = if (csvImportReport.value == null) {
                     "Could not save the CSV import. Please try again."
                 } else {
-                    "Vault cards were saved, but the deck could not be created."
+                    "Catalog cards were saved, but the list or deck could not be saved."
                 }
             } finally {
                 isImportingCsv.value = false
@@ -339,11 +368,12 @@ class VaultViewModel(
         private val cardRepository: CardRepository,
         private val deckRepository: DeckRepository,
         private val networkMonitor: NetworkMonitor,
-        private val preferencesRepository: PreferencesRepository
+        private val preferencesRepository: PreferencesRepository,
+        private val collectionDao: VaultCollectionDao
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return VaultViewModel(cardRepository, deckRepository, networkMonitor, preferencesRepository) as T
+            return VaultViewModel(cardRepository, deckRepository, networkMonitor, preferencesRepository, collectionDao) as T
         }
     }
 }

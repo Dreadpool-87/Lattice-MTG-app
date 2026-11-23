@@ -39,7 +39,9 @@ data class DelverImportReport(
     val unresolvedRows: List<DelverRowResolution>,
     val savedCardsCount: Int,
     val totalVerifiedCopies: Int,
-    val deckIdCreated: Long? = null
+    val deckIdCreated: Long? = null,
+    val collectionName: String? = null,
+    val collectionNotice: String? = null
 )
 
 object DelverCsvImporter {

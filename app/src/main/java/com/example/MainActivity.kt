@@ -135,6 +135,7 @@ fun LatticeRootApp(container: AppContainer) {
     )
     val vaultViewModel: VaultViewModel = viewModel(
         factory = VaultViewModel.Factory(
+            collectionDao = container.vaultCollectionDao,
             cardRepository = container.cardRepository,
             deckRepository = container.deckRepository,
             networkMonitor = container.networkMonitor,
