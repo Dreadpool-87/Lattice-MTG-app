@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +73,9 @@ fun VaultScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val collections by viewModel.collections.collectAsStateWithLifecycle()
+    var collectionView by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val showCollections = collectionView ?: collections.isNotEmpty()
     val inspectionExtras by viewModel.inspectionExtras.collectAsStateWithLifecycle()
     var inspectedCard by remember { mutableStateOf<CardEntity?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
@@ -119,7 +123,8 @@ fun VaultScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${uiState.cards.size} of ${uiState.totalVaultCount} cards in local cache",
+                                text = if (showCollections) "${collections.size} saved collections"
+                                else "${uiState.cards.size} of ${uiState.totalVaultCount} cards in local cache",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -145,145 +150,162 @@ fun VaultScreen(
                         }
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = uiState.query,
-                            onValueChange = viewModel::setQuery,
-                            placeholder = { Text("Search name, set, #no, text...") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search vault") },
-                            trailingIcon = {
-                                if (uiState.query.isNotEmpty()) {
-                                    IconButton(onClick = { viewModel.setQuery("") }) {
-                                        Icon(Icons.Filled.Clear, contentDescription = "Clear search")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = showCollections, onClick = { collectionView = true },
+                            label = { Text("Collections") })
+                        FilterChip(selected = !showCollections, onClick = { collectionView = false },
+                            label = { Text("Catalog") })
+                        if (showCollections) {
+                            OutlinedButton(
+                                onClick = { showCsvImportDialog = true },
+                                modifier = Modifier.testTag("open_csv_import_button")
+                            ) { Text("Import CSV") }
+                        }
+                    }
+
+                    if (!showCollections) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = uiState.query,
+                                onValueChange = viewModel::setQuery,
+                                placeholder = { Text("Search name, set, #no, text...") },
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search vault") },
+                                trailingIcon = {
+                                    if (uiState.query.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.setQuery("") }) {
+                                            Icon(Icons.Filled.Clear, contentDescription = "Clear search")
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("vault_search_input")
+                            )
+
+                            OutlinedButton(
+                                onClick = { showCsvImportDialog = true },
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .testTag("open_csv_import_button")
+                            ) {
+                                Icon(Icons.Filled.UploadFile, contentDescription = "Import CSV", modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("CSV", style = MaterialTheme.typography.labelLarge)
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.syncFromScryfall() },
+                                enabled = !uiState.isSyncing,
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .testTag("sync_scryfall_button")
+                            ) {
+                                if (uiState.isSyncing) {
+                                    CircularProgressIndicator(
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                } else {
+                                    Icon(Icons.Filled.CloudSync, contentDescription = "Sync Scryfall", modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Sync", style = MaterialTheme.typography.labelLarge)
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "Search covers local Room cache only (${uiState.totalVaultCount} cached cards) — not the full MTG catalog. Tap Sync to query Scryfall when online.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("vault_local_cache_notice")
+                        )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            colorFilters.forEach { code ->
+                                val selected = code in uiState.selectedColors
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(
+                                        1.5.dp,
+                                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .clickable { viewModel.toggleColor(code) }
+                                        .testTag("color_filter_$code")
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        ManaSymbolPip(symbol = code, size = 20.dp)
                                     }
                                 }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("vault_search_input")
-                        )
-
-                        OutlinedButton(
-                            onClick = { showCsvImportDialog = true },
-                            contentPadding = PaddingValues(horizontal = 10.dp),
-                            modifier = Modifier
-                                .height(52.dp)
-                                .testTag("open_csv_import_button")
-                        ) {
-                            Icon(Icons.Filled.UploadFile, contentDescription = "Import CSV", modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("CSV", style = MaterialTheme.typography.labelLarge)
-                        }
-
-                        OutlinedButton(
-                            onClick = { viewModel.syncFromScryfall() },
-                            enabled = !uiState.isSyncing,
-                            contentPadding = PaddingValues(horizontal = 10.dp),
-                            modifier = Modifier
-                                .height(52.dp)
-                                .testTag("sync_scryfall_button")
-                        ) {
-                            if (uiState.isSyncing) {
-                                CircularProgressIndicator(
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            } else {
-                                Icon(Icons.Filled.CloudSync, contentDescription = "Sync Scryfall", modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Sync", style = MaterialTheme.typography.labelLarge)
                             }
-                        }
-                    }
 
-                    Text(
-                        text = "Search covers local Room cache only (${uiState.totalVaultCount} cached cards) — not the full MTG catalog. Tap Sync to query Scryfall when online.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag("vault_local_cache_notice")
-                    )
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                    ) {
-                        colorFilters.forEach { code ->
-                            val selected = code in uiState.selectedColors
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(
-                                    1.5.dp,
-                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                                ),
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .clickable { viewModel.toggleColor(code) }
-                                    .testTag("color_filter_$code")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    ManaSymbolPip(symbol = code, size = 20.dp)
-                                }
-                            }
-                        }
-
-                        FilterChip(
-                            selected = uiState.bookmarkedOnly,
-                            onClick = viewModel::toggleBookmarkedOnly,
-                            leadingIcon = {
-                                Icon(
-                                    if (uiState.bookmarkedOnly) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            },
-                            label = { Text("Saved") },
-                            modifier = Modifier.testTag("filter_bookmarked_chip")
-                        )
-
-                        FilterChip(
-                            selected = uiState.maxCmcFilter == 2,
-                            onClick = { viewModel.setMaxCmc(if (uiState.maxCmcFilter == 2) null else 2) },
-                            label = { Text("CMC ≤ 2") },
-                            modifier = Modifier.testTag("filter_cmc2_chip")
-                        )
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                    ) {
-                        cardTypeFilters.forEach { type ->
                             FilterChip(
-                                selected = uiState.selectedType == type,
-                                onClick = { viewModel.setTypeFilter(type) },
-                                label = { Text(type) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.secondary
-                                ),
-                                modifier = Modifier.testTag("type_filter_${type.lowercase()}")
+                                selected = uiState.bookmarkedOnly,
+                                onClick = viewModel::toggleBookmarkedOnly,
+                                leadingIcon = {
+                                    Icon(
+                                        if (uiState.bookmarkedOnly) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = { Text("Saved") },
+                                modifier = Modifier.testTag("filter_bookmarked_chip")
                             )
+
+                            FilterChip(
+                                selected = uiState.maxCmcFilter == 2,
+                                onClick = { viewModel.setMaxCmc(if (uiState.maxCmcFilter == 2) null else 2) },
+                                label = { Text("CMC ≤ 2") },
+                                modifier = Modifier.testTag("filter_cmc2_chip")
+                            )
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            cardTypeFilters.forEach { type ->
+                                FilterChip(
+                                    selected = uiState.selectedType == type,
+                                    onClick = { viewModel.setTypeFilter(type) },
+                                    label = { Text(type) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.secondary
+                                    ),
+                                    modifier = Modifier.testTag("type_filter_${type.lowercase()}")
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            if (uiState.cards.isEmpty()) {
+            if (showCollections) {
+                VaultCollections(collections, onOpenCard = { inspectedCard = it })
+            } else if (uiState.cards.isEmpty()) {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -325,16 +347,18 @@ fun VaultScreen(
             }
         }
 
-        FloatingActionButton(
-            onClick = { showCreateCardDialog = true },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .testTag("create_custom_card_fab")
-        ) {
-            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_create_card))
+        if (!showCollections) {
+            FloatingActionButton(
+                onClick = { showCreateCardDialog = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+                    .testTag("create_custom_card_fab")
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_create_card))
+            }
         }
     }
 
@@ -371,8 +395,10 @@ fun VaultScreen(
         VaultCsvImportDialog(
             isImporting = uiState.isImportingCsv,
             report = uiState.csvImportReport,
-            onImportCsv = { text, deckName, format ->
-                viewModel.importDelverCsv(text, deckName, format)
+            collectionNames = collections.keys,
+            onImportCsv = { text, deckName, format, name, replace ->
+                if (name != null) collectionView = true
+                viewModel.importDelverCsv(text, deckName, format, name, replace)
             },
             onClearReport = viewModel::clearCsvImportReport,
             onDismiss = { showCsvImportDialog = false }

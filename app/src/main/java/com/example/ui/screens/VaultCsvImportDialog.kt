@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -50,14 +51,21 @@ import com.example.domain.DelverImportReport
 fun VaultCsvImportDialog(
     isImporting: Boolean,
     report: DelverImportReport?,
-    onImportCsv: (csvText: String, optionalDeckName: String?, deckFormat: String) -> Unit,
+    collectionNames: Set<String>,
+    onImportCsv: (
+        csvText: String, deckName: String?, deckFormat: String, collectionName: String?, replace: Boolean
+    ) -> Unit,
     onClearReport: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var csvText by remember { mutableStateOf("") }
     var fileLabel by remember { mutableStateOf<String?>(null) }
-    var optionalDeckName by remember { mutableStateOf("") }
+    var saveAsDeck by remember { mutableStateOf(false) }
+    var importName by remember { mutableStateOf("") }
+    val collectionName = importName.trim().ifBlank { "My cards" }
+    val existingCollection = collectionNames.any { it.equals(collectionName, ignoreCase = true) }
+    var replaceCollection by remember(collectionName, saveAsDeck, csvText) { mutableStateOf(false) }
     var deckFormat by remember { mutableStateOf("Commander") }
     var fileReadError by remember { mutableStateOf<String?>(null) }
 
@@ -69,7 +77,13 @@ fun VaultCsvImportDialog(
                 context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
             }.onSuccess { text ->
                 csvText = text
-                fileLabel = uri.lastPathSegment ?: "selected.csv"
+                fileLabel = runCatching {
+                    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    }
+                }.getOrNull() ?: "selected.csv"
+                importName = checkNotNull(fileLabel).substringBeforeLast('.').takeUnless { it == "selected" }.orEmpty()
+                onClearReport()
                 fileReadError = null
             }.onFailure { err ->
                 fileReadError = "Could not read CSV file: ${err.localizedMessage ?: "error"}"
@@ -84,7 +98,7 @@ fun VaultCsvImportDialog(
         },
         title = {
             Text(
-                text = "Import Delver Lens CSV",
+                text = "Import CSV",
                 style = MaterialTheme.typography.headlineSmall
             )
         },
@@ -135,16 +149,33 @@ fun VaultCsvImportDialog(
                         .testTag("csv_import_text_input")
                 )
 
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !saveAsDeck, onClick = { saveAsDeck = false; onClearReport() },
+                        enabled = !isImporting, label = { Text("My collection") })
+                    FilterChip(selected = saveAsDeck, onClick = { saveAsDeck = true; onClearReport() },
+                        enabled = !isImporting, label = { Text("Deck") })
+                }
+
                 OutlinedTextField(
-                    value = optionalDeckName,
-                    onValueChange = { optionalDeckName = it },
-                    label = { Text("Also create deck (optional)") },
-                    placeholder = { Text("Leave blank to import to Vault only") },
+                    value = importName,
+                    onValueChange = { importName = it; onClearReport() },
+                    label = { Text(if (saveAsDeck) "Deck name" else "Collection name") },
+                    placeholder = { Text(if (saveAsDeck) "Imported deck" else "My cards") },
+                    enabled = !isImporting,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (optionalDeckName.isNotBlank()) {
+                if (!saveAsDeck && existingCollection) {
+                    FilterChip(
+                        selected = replaceCollection,
+                        onClick = { replaceCollection = !replaceCollection },
+                        enabled = !isImporting,
+                        label = { Text("Replace existing collection") }
+                    )
+                }
+
+                if (saveAsDeck) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.horizontalScroll(rememberScrollState())
@@ -180,14 +211,17 @@ fun VaultCsvImportDialog(
                 onClick = {
                     onImportCsv(
                         csvText,
-                        optionalDeckName.trim().takeIf { it.isNotEmpty() },
-                        deckFormat
+                        if (saveAsDeck) importName.trim().ifBlank { "Imported deck" } else null,
+                        deckFormat,
+                        collectionName.takeUnless { saveAsDeck },
+                        replaceCollection
                     )
                 },
-                enabled = csvText.isNotBlank() && !isImporting,
+                enabled = csvText.isNotBlank() && !isImporting &&
+                    (saveAsDeck || !existingCollection || replaceCollection),
                 modifier = Modifier.testTag("run_csv_import_button")
             ) {
-                Text(if (report == null) "Verify & Import" else "Re-Verify")
+                Text(if (saveAsDeck) "Import deck" else "Import collection")
             }
         },
         dismissButton = {
@@ -206,6 +240,8 @@ fun VaultCsvImportDialog(
 @Composable
 private fun CsvReviewSummarySection(report: DelverImportReport) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        report.collectionName?.let { Text("Collection saved: $it", style = MaterialTheme.typography.titleSmall) }
+        report.collectionNotice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
             shape = RoundedCornerShape(12.dp),

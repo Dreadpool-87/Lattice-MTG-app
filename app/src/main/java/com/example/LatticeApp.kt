@@ -20,6 +20,7 @@ class AppContainer(application: Application) {
     val preferencesRepository by lazy { PreferencesRepository(application) }
     private val scryfallApi by lazy { ScryfallApi.create() }
     val chatDao by lazy { database.chatDao() }
+    val vaultCollectionDao by lazy { database.vaultCollectionDao() }
 
     val cardRepository by lazy {
         CardRepository(
