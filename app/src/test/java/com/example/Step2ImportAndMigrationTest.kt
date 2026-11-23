@@ -58,7 +58,8 @@ class Step2ImportAndMigrationTest {
     val composeRule = createComposeRule()
 
     private fun createAbandonAttachmentsApi(
-        failFuzzyLookup: Boolean = true
+        failFuzzyLookup: Boolean = true,
+        namedInSet: Map<Pair<String, String?>, ScryfallCardDto> = emptyMap()
     ): ScryfallApi {
         val abandonAttachmentsId = "aaaaaaaa-1111-4444-8888-bbbbbbbbbbbb"
         val abandonAttachmentsOracleId = "99999999-0000-4444-8888-cccccccccccc"
@@ -89,7 +90,8 @@ class Step2ImportAndMigrationTest {
                 error("Card not found")
             }
 
-            override suspend fun getCardNamedExact(exactName: String): ScryfallCardDto {
+            override suspend fun getCardNamedExact(exactName: String, setCode: String?): ScryfallCardDto {
+                namedInSet[exactName to setCode]?.let { return it }
                 if (exactName.equals("Abandon Attachments", ignoreCase = true)) return dto
                 error("Exact card not found: $exactName")
             }
@@ -121,6 +123,48 @@ class Step2ImportAndMigrationTest {
             override suspend fun getCardRulings(scryfallId: String): ScryfallRulingsResponse =
                 ScryfallRulingsResponse()
         }
+    }
+
+    @Test
+    fun `CSV searches a supplied set even when a different printing is cached`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build().use { db ->
+            val foundations = ScryfallCardDto(
+                id = "11111111-2222-4333-8444-555555555555",
+                name = "Valorous Stance",
+                set = "fdn",
+                collectorNumber = "583"
+            )
+            db.cardDao().upsertPreservingState(
+                foundations.copy(id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", set = "trc").toCardEntity()
+            )
+            val rows = DelverCsvImporter.parseCsv("Quantity,Card Name,Set Code\n2,Valorous Stance,FDN")
+            val api = createAbandonAttachmentsApi(namedInSet = mapOf(("Valorous Stance" to "fdn") to foundations))
+            val report = DelverCsvImporter.matchAndImportRows(rows, db.cardDao(), api, canFetchOnline = true)
+            assertEquals(2, report.totalVerifiedCopies)
+            assertEquals("FDN", report.verifiedRows.single().resolvedCard?.setCode)
+            assertEquals("583", report.verifiedRows.single().resolvedCard?.collectorNumber)
+        }
+    }
+
+    @Test
+    fun `CSV accepts Token suffix only on a token with the exact printing ID`() {
+        val printingId = "11111111-2222-4333-8444-555555555555"
+        val token = ScryfallCardDto(
+            id = printingId,
+            name = "Ajani's Pridemate",
+            set = "tfra",
+            collectorNumber = "2",
+            typeLine = "Token Creature — Cat Soldier"
+        ).toCardEntity()
+        val row = DelverCsvImporter.parseCsv(
+            "Name,Quantity,Edition code,Collector's number,Scryfall ID\nAjani's Pridemate Token,1,TFRA,2,$printingId"
+        ).single()
+        assertTrue(DelverCsvImporter.verifySuppliedFields(row, token).isEmpty())
+        assertTrue(DelverCsvImporter.verifySuppliedFields(row.copy(scryfallId = null), token).isNotEmpty())
+        assertTrue(
+            DelverCsvImporter.verifySuppliedFields(row, token.copy(typeLine = "Creature — Cat Soldier")).isNotEmpty()
+        )
     }
 
     @Test

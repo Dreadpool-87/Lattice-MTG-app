@@ -214,6 +214,7 @@ object DelverCsvImporter {
                     row.scryfallId != null -> "Scryfall ID ${row.scryfallId}"
                     row.setCode != null && row.collectorNumber != null ->
                         "${row.name ?: "Card"} (${row.setCode}) #${row.collectorNumber}"
+                    row.name != null && row.setCode != null -> "${row.name} (${row.setCode})"
                     else -> row.name ?: "Row ${row.rowNumber}"
                 }
                 val offlineNote = if (!canFetchOnline) " while offline/local-only" else ""
@@ -321,19 +322,17 @@ object DelverCsvImporter {
             return null
         }
 
-        // 3. Exact card name ONLY when no printing ID / collector number was provided (NO fuzzy match)
+        // Search the supplied set before considering a name match verified.
         row.name?.let { cardName ->
-            val localMatches = cardDao.findAllByExactNameIgnoreCase(cardName)
-                .filter { it.metadataStatus != CardMetadataStatus.UNRESOLVED }
-            if (localMatches.isNotEmpty()) {
-                if (row.setCode != null) {
-                    return localMatches.firstOrNull { it.setCode.equals(row.setCode, ignoreCase = true) }
-                        ?: localMatches.first()
-                }
-                return localMatches.first()
+            val local = cardDao.findAllByExactNameIgnoreCase(cardName).firstOrNull {
+                it.metadataStatus != CardMetadataStatus.UNRESOLVED && verifySuppliedFields(row, it).isEmpty()
             }
+            if (local != null) return local
+
             if (canFetchOnline && scryfallApi != null) {
-                return fetchRemoteSafe { scryfallApi.getCardNamedExact(cardName).toCardEntity() }
+                return fetchRemoteSafe {
+                    scryfallApi.getCardNamedExact(cardName, setCode = row.setCode?.lowercase()).toCardEntity()
+                }
             }
         }
         return null
@@ -395,7 +394,11 @@ object DelverCsvImporter {
         row.name?.let { expectedName ->
             val matchesFull = candidate.name.equals(expectedName, ignoreCase = true)
             val matchesFace = candidate.name.split(" // ").any { it.trim().equals(expectedName, ignoreCase = true) }
-            if (!matchesFull && !matchesFace) {
+            val matchesTokenExport = row.scryfallId != null &&
+                row.scryfallId.equals(candidate.scryfallId, ignoreCase = true) &&
+                candidate.typeLine.substringBefore('—').split(' ').any { it.equals("Token", ignoreCase = true) } &&
+                expectedName.equals("${candidate.name} Token", ignoreCase = true)
+            if (!matchesFull && !matchesFace && !matchesTokenExport) {
                 mismatches.add("Name mismatch: CSV expected '$expectedName', printing is '${candidate.name}'.")
             }
         }

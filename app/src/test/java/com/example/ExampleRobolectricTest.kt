@@ -106,7 +106,7 @@ class ExampleRobolectricTest {
                     error("Unused in test")
                 }
 
-                override suspend fun getCardNamedExact(exactName: String): ScryfallCardDto {
+                override suspend fun getCardNamedExact(exactName: String, setCode: String?): ScryfallCardDto {
                     error("Unused in test")
                 }
 
