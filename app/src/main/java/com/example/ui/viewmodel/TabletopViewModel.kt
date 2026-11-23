@@ -202,7 +202,7 @@ class TabletopViewModel(
             statusMessageFlow.value = if (enabled) {
                 "Offline-Only Mode enabled. All queries strictly stay on-device."
             } else {
-                "Auto-Sync enabled when network is available."
+                "Online card lookups are available when connected."
             }
         }
     }
