@@ -13,6 +13,7 @@ import com.example.data.repository.PreferencesRepository
 import com.example.data.repository.SyncResult
 import com.example.domain.CardRulingInfo
 import com.example.domain.DelverImportReport
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -277,31 +278,36 @@ class VaultViewModel(
         createDeckName: String? = null,
         deckFormat: String = "Commander"
     ) {
-        if (csvContent.isBlank()) return
+        if (csvContent.isBlank() || !isImportingCsv.compareAndSet(false, true)) return
+        csvImportReport.value = null
         viewModelScope.launch {
-            isImportingCsv.value = true
-            val baseReport = cardRepository.importDelverCsv(
-                csvContent = csvContent,
-                offlineOnlyMode = uiState.value.offlineOnlyMode
-            )
-            val createdDeckId = if (!createDeckName.isNullOrBlank() && baseReport.verifiedRows.isNotEmpty()) {
-                deckRepository.addVerifiedCsvToNewDeck(createDeckName, deckFormat, baseReport)
-            } else {
-                null
-            }
-            val finalReport = baseReport.copy(deckIdCreated = createdDeckId)
-            csvImportReport.value = finalReport
-            statusBanner.value = buildString {
-                append("CSV review: ${finalReport.totalVerifiedCopies} verified copies")
-                if (finalReport.conflictRows.isNotEmpty()) {
-                    append(", ${finalReport.conflictRows.size} mismatches")
+            try {
+                val report = cardRepository.importDelverCsv(
+                    csvContent = csvContent,
+                    offlineOnlyMode = uiState.value.offlineOnlyMode
+                )
+                csvImportReport.value = report
+                val deckId = if (!createDeckName.isNullOrBlank()) {
+                    deckRepository.addVerifiedCsvToNewDeck(createDeckName, deckFormat, report)
+                } else null
+                csvImportReport.value = report.copy(deckIdCreated = deckId)
+                statusBanner.value = buildString {
+                    append("CSV review: ${report.totalVerifiedCopies} verified copies")
+                    if (report.conflictRows.isNotEmpty()) append(", ${report.conflictRows.size} mismatches")
+                    if (report.unresolvedRows.isNotEmpty()) append(", ${report.unresolvedRows.size} unresolved")
+                    append(".")
                 }
-                if (finalReport.unresolvedRows.isNotEmpty()) {
-                    append(", ${finalReport.unresolvedRows.size} unresolved")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                statusBanner.value = if (csvImportReport.value == null) {
+                    "Could not save the CSV import. Please try again."
+                } else {
+                    "Vault cards were saved, but the deck could not be created."
                 }
-                append(".")
+            } finally {
+                isImportingCsv.value = false
             }
-            isImportingCsv.value = false
         }
     }
 

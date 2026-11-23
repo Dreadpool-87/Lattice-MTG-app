@@ -57,4 +57,38 @@ interface DeckDao {
 
     @Query("DELETE FROM deck_entries WHERE id = :entryId")
     suspend fun deleteEntryById(entryId: Long)
+
+    @Transaction
+    suspend fun insertDeckWithEntries(deck: DeckEntity, entries: List<DeckEntryEntity>): Long {
+        val deckId = insertDeck(deck)
+        insertEntries(entries.map { it.copy(deckId = deckId) })
+        return deckId
+    }
+
+    @Transaction
+    suspend fun addCardQuantity(deckId: Long, cardId: String, zone: String, delta: Int) {
+        val existing = getEntry(deckId, cardId, zone)
+        val quantity = Math.addExact(existing?.quantity ?: 0, delta)
+        setCardQuantity(deckId, cardId, zone, quantity)
+    }
+
+    @Transaction
+    suspend fun setCardQuantity(deckId: Long, cardId: String, zone: String, quantity: Int) {
+        if (quantity <= 0) {
+            deleteEntry(deckId, cardId, zone)
+        } else {
+            val existing = getEntry(deckId, cardId, zone)
+            upsertEntry(existing?.copy(quantity = quantity)
+                ?: DeckEntryEntity(deckId = deckId, cardId = cardId, zone = zone, quantity = quantity))
+        }
+        touchDeck(deckId)
+    }
+
+    @Transaction
+    suspend fun moveCardZone(deckId: Long, cardId: String, fromZone: String, toZone: String) {
+        if (fromZone == toZone) return
+        val source = getEntry(deckId, cardId, fromZone) ?: return
+        deleteEntryById(source.id)
+        addCardQuantity(deckId, cardId, toZone, source.quantity)
+    }
 }

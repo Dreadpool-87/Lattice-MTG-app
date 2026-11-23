@@ -8,6 +8,7 @@ import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -123,14 +124,20 @@ class DecksViewModel(
     fun importDeck(name: String, format: String, rawList: String, onImported: (Long) -> Unit) {
         if (rawList.isBlank()) return
         viewModelScope.launch {
-            val result = deckRepository.importDeckFromText(
-                name = name,
-                format = format,
-                rawText = rawList,
-                offlineOnlyMode = uiState.value.offlineOnlyMode
-            )
-            statusMessage.value = "Imported ${result.totalCardsImported} cards (${result.uniqueEntries} unique)."
-            onImported(result.deckId)
+            try {
+                val result = deckRepository.importDeckFromText(
+                    name = name,
+                    format = format,
+                    rawText = rawList,
+                    offlineOnlyMode = uiState.value.offlineOnlyMode
+                )
+                statusMessage.value = "Imported ${result.totalCardsImported} cards (${result.uniqueEntries} unique)."
+                onImported(result.deckId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                statusMessage.value = "Could not import the deck. Check the decklist and try again."
+            }
         }
     }
 

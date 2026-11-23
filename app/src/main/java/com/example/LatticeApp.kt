@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import com.example.data.local.CardDao
 import com.example.data.local.LatticeDatabase
 import com.example.data.local.StarterCards
 import com.example.data.remote.ScryfallApi
@@ -35,11 +36,12 @@ class AppContainer(application: Application) {
         )
     }
 
-    suspend fun ensureSeeded() {
-        val cardDao = database.cardDao()
-        if (cardDao.getCardCount() == 0) {
-            cardDao.upsertAllPreservingState(StarterCards.cards)
-        }
+    suspend fun ensureSeeded() = seedStarterCatalogIfEmpty(database.cardDao())
+}
+
+internal suspend fun seedStarterCatalogIfEmpty(cardDao: CardDao) {
+    if (cardDao.getCardCount() == 0) {
+        cardDao.upsertAllPreservingState(StarterCards.cards)
     }
 }
 

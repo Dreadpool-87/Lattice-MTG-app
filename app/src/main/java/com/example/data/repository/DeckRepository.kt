@@ -68,19 +68,10 @@ class DeckRepository(
     suspend fun duplicateDeck(deckId: Long): Long? {
         val source = deckDao.getDeckWithEntriesOnce(deckId) ?: return null
         val now = System.currentTimeMillis()
-        val newDeckId = deckDao.insertDeck(
-            source.deck.copy(
-                id = 0L,
-                name = "${source.deck.name} (Copy)",
-                createdAt = now,
-                updatedAt = now
-            )
+        return deckDao.insertDeckWithEntries(
+            source.deck.copy(id = 0L, name = "${source.deck.name} (Copy)", createdAt = now, updatedAt = now),
+            source.entries.map { it.entry.copy(id = 0L) }
         )
-        val copiedEntries = source.entries.map {
-            it.entry.copy(id = 0L, deckId = newDeckId)
-        }
-        deckDao.insertEntries(copiedEntries)
-        return newDeckId
     }
 
     suspend fun addCardToDeck(
@@ -88,62 +79,21 @@ class DeckRepository(
         cardId: String,
         zone: String = DeckZones.MAINBOARD,
         delta: Int = 1
-    ) {
-        val existing = deckDao.getEntry(deckId, cardId, zone)
-        if (existing == null) {
-            if (delta > 0) {
-                deckDao.upsertEntry(
-                    DeckEntryEntity(
-                        deckId = deckId,
-                        cardId = cardId,
-                        quantity = delta,
-                        zone = zone
-                    )
-                )
-            }
-        } else {
-            val nextQty = existing.quantity + delta
-            if (nextQty <= 0) {
-                deckDao.deleteEntryById(existing.id)
-            } else {
-                deckDao.upsertEntry(existing.copy(quantity = nextQty))
-            }
-        }
-        deckDao.touchDeck(deckId)
-    }
+    ) = deckDao.addCardQuantity(deckId, cardId, zone, delta)
 
     suspend fun setCardQuantity(
         deckId: Long,
         cardId: String,
         zone: String,
         quantity: Int
-    ) {
-        if (quantity <= 0) {
-            deckDao.deleteEntry(deckId, cardId, zone)
-        } else {
-            val existing = deckDao.getEntry(deckId, cardId, zone)
-            if (existing == null) {
-                deckDao.upsertEntry(
-                    DeckEntryEntity(deckId = deckId, cardId = cardId, quantity = quantity, zone = zone)
-                )
-            } else {
-                deckDao.upsertEntry(existing.copy(quantity = quantity))
-            }
-        }
-        deckDao.touchDeck(deckId)
-    }
+    ) = deckDao.setCardQuantity(deckId, cardId, zone, quantity)
 
     suspend fun moveCardZone(
         deckId: Long,
         cardId: String,
         fromZone: String,
         toZone: String
-    ) {
-        if (fromZone == toZone) return
-        val existing = deckDao.getEntry(deckId, cardId, fromZone) ?: return
-        deckDao.deleteEntryById(existing.id)
-        addCardToDeck(deckId, cardId, toZone, existing.quantity)
-    }
+    ) = deckDao.moveCardZone(deckId, cardId, fromZone, toZone)
 
     fun exportDeckAsText(deckWithEntries: DeckWithEntries): String {
         val sb = StringBuilder()
@@ -177,17 +127,9 @@ class DeckRepository(
         rawText: String,
         offlineOnlyMode: Boolean
     ): ImportDeckResult {
-        val deckId = createDeck(
-            name = name.ifBlank { "Imported Deck" },
-            format = format,
-            description = "Imported offline from decklist text",
-            colorIdentity = emptyList()
-        )
-
         var currentZone = DeckZones.MAINBOARD
-        var totalCards = 0
-        var uniqueCount = 0
-        val lineRegex = Regex("""^(\d+)x?\s+(.+?)(?:\s+\([A-Za-z0-9]+\)\s*\d*)?$""")
+        val quantities = linkedMapOf<Pair<String, String>, Int>()
+        val lineRegex = Regex("""^(\d+)x?\s+(.+?)(?:\s+\([A-Za-z0-9]+\)(?:\s+[0-9][0-9A-Za-z★-]*)?)?(?:\s+\*[FE]\*)?$""")
 
         rawText.lines().forEach { rawLine ->
             val line = rawLine.trim()
@@ -216,17 +158,20 @@ class DeckRepository(
             val cardName = (match?.groupValues?.get(2) ?: line).trim()
             if (cardName.isNotEmpty()) {
                 val card = cardRepository.resolveOrCreateCardByName(cardName, offlineOnlyMode)
-                addCardToDeck(deckId, card.id, currentZone, qty)
-                totalCards += qty
-                uniqueCount += 1
+                val key = card.id to currentZone
+                quantities[key] = Math.addExact(quantities[key] ?: 0, qty)
             }
         }
 
-        return ImportDeckResult(
-            deckId = deckId,
-            totalCardsImported = totalCards,
-            uniqueEntries = uniqueCount
+        val entries = quantities.map { (key, quantity) ->
+            DeckEntryEntity(deckId = 0L, cardId = key.first, zone = key.second, quantity = quantity)
+        }
+        require(entries.isNotEmpty()) { "The decklist contains no cards." }
+        val deckId = deckDao.insertDeckWithEntries(
+            DeckEntity(name = name.ifBlank { "Imported Deck" }.trim(), format = format, description = "Imported from decklist text"),
+            entries
         )
+        return ImportDeckResult(deckId, entries.sumOf { it.quantity }, entries.size)
     }
 
     suspend fun addVerifiedCsvToNewDeck(
@@ -235,16 +180,17 @@ class DeckRepository(
         report: com.example.domain.DelverImportReport
     ): Long? {
         if (report.verifiedRows.isEmpty()) return null
-        val deckId = createDeck(
-            name = name.ifBlank { "Delver CSV Import" },
-            format = format,
-            description = "Imported ${report.totalVerifiedCopies} verified copies from Delver Lens CSV",
-            colorIdentity = emptyList()
-        )
-        report.verifiedRows.forEach { res ->
-            val card = res.resolvedCard ?: return@forEach
-            addCardToDeck(deckId, card.id, DeckZones.MAINBOARD, res.row.quantity)
+        val entries = report.verifiedRows.groupBy { checkNotNull(it.resolvedCard).id }.map { (id, rows) ->
+            val quantity = rows.fold(0) { total, resolution -> Math.addExact(total, resolution.row.quantity) }
+            DeckEntryEntity(deckId = 0L, cardId = id, quantity = quantity)
         }
-        return deckId
+        return deckDao.insertDeckWithEntries(
+            DeckEntity(
+                name = name.ifBlank { "Delver CSV Import" }.trim(),
+                format = format,
+                description = "Imported ${report.totalVerifiedCopies} verified copies from Delver Lens CSV"
+            ),
+            entries
+        )
     }
 }
