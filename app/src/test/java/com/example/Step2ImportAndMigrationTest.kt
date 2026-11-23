@@ -128,7 +128,8 @@ class Step2ImportAndMigrationTest {
     @Test
     fun `CSV searches a supplied set even when a different printing is cached`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build().use { db ->
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
             val foundations = ScryfallCardDto(
                 id = "11111111-2222-4333-8444-555555555555",
                 name = "Valorous Stance",
@@ -144,6 +145,8 @@ class Step2ImportAndMigrationTest {
             assertEquals(2, report.totalVerifiedCopies)
             assertEquals("FDN", report.verifiedRows.single().resolvedCard?.setCode)
             assertEquals("583", report.verifiedRows.single().resolvedCard?.collectorNumber)
+        } finally {
+            db.close()
         }
     }
 
