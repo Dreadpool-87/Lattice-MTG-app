@@ -39,6 +39,12 @@ The repository includes tests for card refresh, upgrading the local database, De
 
 The app uses [Firebase AI Logic](https://firebase.google.com/docs/ai-logic) and [App Check](https://firebase.google.com/docs/ai-logic/app-check) for Oracle chat. To test chat outside AI Studio, configure Firebase and App Check for your build. Keep local environment files, signing keys, and App Check debug tokens out of commits and issue reports.
 
+## In-app updates
+
+In **Settings → App updates**, check for a new version and select **Update** when one is offered. Android asks for confirmation and may ask you to allow installs from Lattice MTG the first time.
+
+For each stable GitHub release, attach the signed APK as `lattice-android.apk` and an `android-update.json` file containing `tag` (the exact GitHub release tag), `versionCode` (the integer in the APK), and `sha256` (the lowercase SHA-256 digest of the signed APK). Attach both assets before publishing. Raise the APK version code for each release and use the same application ID and signing key as the installed APK. Android verifies the signature when installing over the existing app.
+
 ## Credits and licensing
 
 - [Scryfall](https://scryfall.com/) provides online card data and images.
