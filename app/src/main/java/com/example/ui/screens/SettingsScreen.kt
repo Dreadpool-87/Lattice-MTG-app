@@ -135,6 +135,8 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .widthIn(max = 720.dp)
             ) {
+                item { AppUpdateSettings() }
+
                 // 1. WUBRG 5-Theme Selector & Brightness Mode
                 item {
                     SettingsSectionCard(
