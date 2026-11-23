@@ -2,22 +2,23 @@
 
 Lattice MTG is a native Android companion for Magic: The Gathering. Browse a local card vault, manage decklists, and track a tabletop game on your phone. The app is built with Kotlin, Jetpack Compose, and Room.
 
-**Status:** Development preview. Use test decks while the card refresh issue below is open.
+**Development preview.** The Android app is still in active development. Features, data handling, and installation steps may change. Keep a separate copy of important decklists while testing preview builds.
 
 [Web app](https://dreadpool-87.github.io/Lattice-MTG/) · [Web source](https://github.com/Dreadpool-87/Lattice-MTG) · [Report an issue](https://github.com/Dreadpool-87/Lattice-MTG-app/issues)
 
 ## Features
 
-- **Card Vault.** Search and filter a bundled starter catalog and locally cached cards. Bookmark cards, create custom entries, and fetch additional cards from Scryfall.
+- **Card Vault.** Search and filter a bundled starter catalog and locally cached cards. Bookmark cards, create custom entries, and fetch additional cards from Scryfall. Inspect card faces, locally cached printings, and rulings when available.
+- **Delver Lens import.** Open **Vault → CSV** to add verified printings to the Vault. Review verified copies, conflicts, and unresolved rows. You can also create a deck from the verified rows.
 - **Decks.** Create and edit decks, paste a text decklist, copy a decklist to the clipboard, and view mana curve and synergy summaries.
 - **Tabletop.** Track life totals, poison counters, and commander damage. Use the probability calculator to explore draws.
 - **Lattice Oracle.** Ask Gemini questions through Firebase AI Logic. If you select a deck, the app sends relevant deck information with your question, including up to 35 mainboard entries. Deck statistics and AI replies are aids for reviewing a deck.
 
 ## Current limitations
 
-- Refreshing a card already used in a saved deck can remove its deck entries or reset its bookmark. Keep a separate copy of important decklists while this is being fixed.
-- The Android app imports plain-text decklists. For Delver Lens collection CSVs and exact printing verification, use [Import collection on the website](https://dreadpool-87.github.io/Lattice-MTG/collection/).
-- The Vault searches the local starter catalog and cached results. Scryfall search can add cards to that cache. The website provides the full Lattice catalog, printing details, and official rulings.
+- The Vault searches the starter catalog and cards stored on your device. Online Scryfall lookups can expand that cache. In offline-only mode, CSV rows that require an online lookup remain unresolved.
+- CSV quantities appear in the import report and carry over when you create a deck. The Vault stores card records. Use the [web collection importer](https://dreadpool-87.github.io/Lattice-MTG/collection/) for collection-level exports.
+- Deck checks cover selected rules. Review format-specific requirements separately, especially when some cards are unresolved or the Oracle chat received only part of the decklist.
 
 ## Build and test
 
@@ -33,6 +34,8 @@ gradle :app:assembleDebug :app:testDebugUnitTest
 ```
 
 Keep the signing key used for any installed build you plan to update in place. For instrumentation tests, attach a device or start an emulator, then run `gradle :app:connectedDebugAndroidTest`.
+
+The repository includes tests for card refresh, upgrading the local database, Delver Lens import, deck checks, and the scope of data sent to Gemini. When reporting a bug, include the app version or commit, your Android version, and steps to reproduce it.
 
 The app uses [Firebase AI Logic](https://firebase.google.com/docs/ai-logic) and [App Check](https://firebase.google.com/docs/ai-logic/app-check) for Oracle chat. To test chat outside AI Studio, configure Firebase and App Check for your build. Keep local environment files, signing keys, and App Check debug tokens out of commits and issue reports.
 
