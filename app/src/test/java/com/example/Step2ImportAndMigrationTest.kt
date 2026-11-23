@@ -143,7 +143,7 @@ class Step2ImportAndMigrationTest {
 
             // 1. Verify parenthesized set code (TLA), collector number 205, English, Scryfall printing ID, quantity 2
             val verifiedCsv = """
-                Quantity,Name,Edition code,Collector's number,Language,Scryfall ID
+                Quantity,Name,Edition (code),Collector's number,Language,Scryfall ID
                 2,"Abandon Attachments","(TLA)",205,English,$abandonPrintingId
             """.trimIndent()
 
@@ -165,7 +165,7 @@ class Step2ImportAndMigrationTest {
 
             // 2. Conflicting set code with same Scryfall printing ID -> visible mismatch, NOT accepted
             val conflictingCsv = """
-                Quantity,Name,Edition code,Collector's number,Language,Scryfall ID
+                Quantity,Name,Edition (code),Collector's number,Language,Scryfall ID
                 2,"Abandon Attachments",(MH3),205,English,$abandonPrintingId
             """.trimIndent()
 
