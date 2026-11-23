@@ -1,0 +1,29 @@
+Lattice MTG · logopakket voor Android
+
+LOGO
+logo/lattice-spark.svg is het originele Lattice Spark-logo.
+De PNG-bestanden (192, 512 en 1024 px) en de 512 px WebP zijn transparant.
+
+GOOGLE PLAY
+Gebruik google-play/lattice-mtg-play-512.png voor je winkelvermelding.
+Het bestand is vierkant, 512 × 512 px, 32-bit PNG en sRGB.
+Google Play past de vorm en schaduw toe.
+
+ANDROID STUDIO
+Kopieer de inhoud van android/res/ naar app/src/main/res/ van je appmodule.
+Zet op het bestaande <application>-element in AndroidManifest.xml:
+    android:icon="@mipmap/lattice_launcher"
+Als dat element al android:roundIcon bevat, laat het dan naar dezelfde
+@mipmap/lattice_launcher verwijzen om ook op die launchers je logo te tonen.
+Het pakket bevat een adaptief launchericoon vanaf Android 8, een
+monochrome laag voor thema-iconen vanaf Android 13 en PNG-fallbacks.
+Gebruik @drawable/lattice_logo voor het transparante vectorlogo in de app.
+
+ONTWERP
+Het icoon gebruikt het bestaande groene beeldmerk op de donkere basiskleur
+van de Lattice MTG-site (#101714). De SVG behoudt de originele kleuren.
+
+BRONNEN
+https://github.com/Dreadpool-87/Lattice-MTG/blob/main/dist/lattice-spark.svg
+https://developer.android.com/develop/ui/compose/system/icon_design_adaptive
+https://developer.android.com/distribute/google-play/resources/icon-design-specifications

@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">Lattice MTG</string>
+    <string name="nav_decks">Decks</string>
+    <string name="nav_synergy">Synergy</string>
+    <string name="nav_vault">Card Vault</string>
+    <string name="nav_oracle">Oracle</string>
+    <string name="nav_tabletop">Tabletop</string>
+    <string name="synergy_title">Synergy Analyzer</string>
+    <string name="synergy_subtitle">Archetype Blueprints &amp; Card Relationship Lattice</string>
+    <string name="oracle_title">Lattice Oracle</string>
+    <string name="oracle_subtitle">MTG Rules Judge &amp; Deck Strategist</string>
+    <string name="offline_ready_badge">Offline Vault Ready</string>
+    <string name="online_sync_badge">Online • Sync Ready</string>
+    <string name="offline_mode_forced">Offline Mode Locked</string>
+    <string name="action_new_deck">New Deck</string>
+    <string name="action_import_deck">Import List</string>
+    <string name="action_sync_scryfall">Sync Scryfall</string>
+    <string name="action_create_card">New Card</string>
+    <string name="empty_decks_title">Your Deck Box Is Empty</string>
+    <string name="empty_decks_subtitle">Forge a new deck or import an existing list to build and playtest offline.</string>
+    <string name="error_network_offline">Device is offline. Showing cards from your local Room vault.</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Themes, Offline Vault &amp; Preferences</string>
+    <string name="about_title">About &amp; Licenses</string>
+    <string name="about_subtitle">Lattice MTG • Credits, Fan Policy &amp; Open Source</string>
+    <string name="action_open_settings">Open Settings</string>
+</resources>
