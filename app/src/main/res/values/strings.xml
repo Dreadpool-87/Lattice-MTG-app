@@ -3,6 +3,7 @@
     <string name="nav_decks">Decks</string>
     <string name="nav_synergy">Synergy</string>
     <string name="nav_vault">Card Vault</string>
+    <string name="nav_vault_compact">Vault</string>
     <string name="nav_oracle">Oracle</string>
     <string name="nav_tabletop">Tabletop</string>
     <string name="synergy_title">Synergy Analyzer</string>
