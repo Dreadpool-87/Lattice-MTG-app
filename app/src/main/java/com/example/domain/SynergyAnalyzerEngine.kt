@@ -1,6 +1,7 @@
 package com.example.domain
 
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
@@ -11,6 +12,7 @@ enum class RelationshipType(val label: String) {
     ENGINE_ENABLER("Engine Enabler"),
     TUTOR_TARGET("Tutor Target"),
     PROTECTION_PAYOFF("Protection & Payoff"),
+    COMBAT_SYNERGY("Combat Synergy"),
     CURVE_SYNERGY("Tempo / Curve")
 }
 
@@ -22,14 +24,6 @@ data class CardRelationship(
     val strength: Int, // 1..3
     val title: String,
     val explanation: String
-)
-
-data class DeckCardNode(
-    val card: CardEntity,
-    val quantity: Int,
-    val roleLabel: String,
-    val connectionCount: Int,
-    val totalStrength: Int
 )
 
 data class ArchetypeTemplate(
@@ -52,10 +46,12 @@ data class ArchetypeTemplate(
 
 data class ArchetypeMatchResult(
     val template: ArchetypeTemplate,
-    val matchScore: Int, // 0..100
-    val matchedCards: List<String>,
-    val matchedTags: List<String>
-)
+    internal val ranking: Double,
+    val matchedCards: List<String>
+) {
+    val hasEvidence: Boolean
+        get() = matchedCards.size >= 2
+}
 
 data class DeckRoleCounts(
     val playableTotal: Int,
@@ -63,7 +59,7 @@ data class DeckRoleCounts(
     val threats: Int,
     val interaction: Int,
     val drawAndRamp: Int,
-    val avgCmc: Double
+    val avgCmc: Double?
 )
 
 data class SynergyAnalyzerReport(
@@ -71,11 +67,11 @@ data class SynergyAnalyzerReport(
     val roles: DeckRoleCounts,
     val archetypeMatches: List<ArchetypeMatchResult>,
     val relationships: List<CardRelationship>,
-    val graphNodes: List<DeckCardNode>,
-    val keystoneCards: List<DeckCardNode>
+    val analyzedCardNames: Set<String>,
+    val skippedCopies: Int
 ) {
     val primaryArchetype: ArchetypeMatchResult?
-        get() = archetypeMatches.firstOrNull()
+        get() = archetypeMatches.firstOrNull { roles.avgCmc != null && it.hasEvidence }
 }
 
 object SynergyAnalyzerEngine {
@@ -335,19 +331,19 @@ object SynergyAnalyzerEngine {
             "Whir of Invention", "Mycosynth Lattice",
             RelationshipType.TUTOR_TARGET, 3,
             "Instant-Speed Lattice Tutor",
-            "Improvise lets you tap mana rocks and Tokens to Whir directly for Mycosynth Lattice onto the battlefield at opponents' end step."
+            "With X at least 6, Whir puts Mycosynth Lattice from your library onto the battlefield. Improvise can help pay the generic portion of Whir's cost."
         ),
         CuratedPairRule(
             "Whir of Invention", "The One Ring",
             RelationshipType.TUTOR_TARGET, 3,
             "End-Step Artifact Tutor",
-            "Fetch The One Ring straight into play with Improvise for fog protection and scaling card draw."
+            "With X at least 4, Whir puts The One Ring from your library onto the battlefield. You can use the Ring's draw ability. Its protection trigger requires casting the Ring itself, so it does not trigger here."
         ),
         CuratedPairRule(
             "Fabricate", "Mycosynth Lattice",
             RelationshipType.TUTOR_TARGET, 2,
             "Direct Combo Tutor",
-            "Fabricate reliably locates Mycosynth Lattice, Darksteel Forge, or Unwinding Clock from anywhere in the library."
+            "When Fabricate resolves, it can find Mycosynth Lattice in your library and put it into your hand."
         ),
         CuratedPairRule(
             "Urza's Saga", "Sol Ring",
@@ -371,7 +367,7 @@ object SynergyAnalyzerEngine {
             "Skullclamp", "Monastery Mentor",
             RelationshipType.ENGINE_ENABLER, 3,
             "Endless Monk Draw Engine",
-            "Casting noncreature spells (including Equip or cantrips) spawns 1/1 Monk tokens that Skullclamp immediately converts into two cards."
+            "Monastery Mentor creates a 1/1 Monk when you cast a noncreature spell. If Skullclamp equips a Monk with 1 toughness, the Monk dies and Skullclamp draws you two cards."
         ),
         CuratedPairRule(
             "Dragon's Rage Channeler", "Mishra's Bauble",
@@ -405,9 +401,9 @@ object SynergyAnalyzerEngine {
         ),
         CuratedPairRule(
             "Monastery Swiftspear", "Boros Charm",
-            RelationshipType.COMBO_LOCK, 3,
-            "Double Strike Prowess Alpha",
-            "Giving a prowess-boosted Swiftspear Double Strike plus +1/+1 converts cheap instants into lethal bursts."
+            RelationshipType.COMBAT_SYNERGY, 3,
+            "Prowess and Double Strike",
+            "Casting Boros Charm while Monastery Swiftspear is on the battlefield triggers Swiftspear's prowess for +1/+1. Choose Charm's double-strike mode and target Swiftspear before combat damage to give it double strike."
         ),
         CuratedPairRule(
             "Smothering Tithe", "Rhystic Study",
@@ -419,7 +415,7 @@ object SynergyAnalyzerEngine {
             "Sheoldred, the Apocalypse", "The One Ring",
             RelationshipType.PROTECTION_PAYOFF, 3,
             "Burden Life-Loss Offset",
-            "Sheoldred gains 2 life per card drawn off The One Ring, completely negating burden counter life loss."
+            "With Sheoldred on the battlefield, you gain 2 life for each card you draw from The One Ring. This can offset life lost to the Ring's burden counters on your upkeep."
         ),
         CuratedPairRule(
             "Academy Ruins", "Mishra's Bauble",
@@ -431,7 +427,7 @@ object SynergyAnalyzerEngine {
             "Inventors' Fair", "Mycosynth Lattice",
             RelationshipType.TUTOR_TARGET, 2,
             "Land-Slot Artifact Tutor",
-            "Having three artifacts enables life gain and lets Inventors' Fair tutor your Lattice combo piece without spending a spell slot."
+            "If you control at least three artifacts, you can pay {4}, tap and sacrifice Inventors' Fair to put Mycosynth Lattice from your library into your hand."
         )
     )
 
@@ -440,19 +436,30 @@ object SynergyAnalyzerEngine {
             it.entry.zone == DeckZones.MAINBOARD || it.entry.zone == DeckZones.COMMANDER
         }
         val playableTotal = playable.sumOf { it.entry.quantity }
+        val verified = playable.filter {
+            it.card.metadataStatus == CardMetadataStatus.VERIFIED &&
+                !it.card.isCustom && !it.card.isUnresolvedForAnalysis
+        }
+        val oracleIdsByName = verified.oracleIdsByName()
+        val byIdentity = verified.groupBy { canonicalCardIdentityKey(it.card, oracleIdsByName) }
+        val cardsByIdentity = byIdentity.values.map { printings ->
+            val representative = printings.first()
+            representative.copy(
+                entry = representative.entry.copy(quantity = printings.sumOf { it.entry.quantity })
+            )
+        }
+        val inLibrary = byIdentity.values.mapNotNull { printings ->
+            printings.first().card.id.takeIf { printings.any { it.entry.zone == DeckZones.MAINBOARD } }
+        }.toSet()
 
-        val roles = computeRoleCounts(playable, playableTotal)
-        val archetypeMatches = scoreArchetypes(playable, playableTotal, roles.avgCmc)
-        val relationships = discoverRelationships(playable)
-        val nodeStats = buildDeckNodes(playable, relationships)
-
+        val roles = computeRoleCounts(verified, playableTotal)
         return SynergyAnalyzerReport(
             deckWithEntries = deckWithEntries,
             roles = roles,
-            archetypeMatches = archetypeMatches,
-            relationships = relationships,
-            graphNodes = nodeStats.take(12),
-            keystoneCards = nodeStats.take(5)
+            archetypeMatches = scoreArchetypes(cardsByIdentity, roles.avgCmc),
+            relationships = discoverRelationships(cardsByIdentity.map { it.card }, inLibrary),
+            analyzedCardNames = verified.map { it.card.name }.toSet(),
+            skippedCopies = playableTotal - verified.sumOf { it.entry.quantity }
         )
     }
 
@@ -470,127 +477,79 @@ object SynergyAnalyzerEngine {
         playable.forEach { item ->
             val qty = item.entry.quantity
             val card = item.card
-            val typeLower = card.typeLine.lowercase()
-            val tagsLower = card.synergyTags.lowercase()
+            val types = card.frontTypes
+            val tags = card.synergyTags.lowercase()
 
-            if ("land" in typeLower) {
+            if ("land" in types) {
                 lands += qty
             } else {
                 nonLandCount += qty
                 cmcSum += card.cmc * qty
 
-                val isInteraction = "removal" in tagsLower ||
-                    "countermagic" in tagsLower ||
-                    "board wipe" in tagsLower ||
-                    "disruption" in tagsLower ||
-                    "burn" in tagsLower
-                val isDrawOrRamp = "card draw" in tagsLower ||
-                    "card advantage" in tagsLower ||
-                    "ramp" in tagsLower ||
-                    "cost reduction" in tagsLower ||
-                    "tutor" in tagsLower
-                val isThreat = "creature" in typeLower ||
-                    "planeswalker" in typeLower ||
-                    "finisher" in tagsLower ||
-                    "combo" in tagsLower ||
-                    "tokens" in tagsLower
+                val isInteraction = "removal" in tags || "countermagic" in tags ||
+                    "board wipe" in tags || "disruption" in tags || "burn" in tags
+                val isDrawOrRamp = "card draw" in tags || "card advantage" in tags ||
+                    "ramp" in tags || "cost reduction" in tags || "tutor" in tags
+                val isThreat = "creature" in types || "planeswalker" in types ||
+                    "finisher" in tags || "combo" in tags || "tokens" in tags
 
                 when {
                     isThreat -> threats += qty
                     isInteraction -> interaction += qty
                     isDrawOrRamp -> drawAndRamp += qty
-                    else -> interaction += qty
                 }
             }
         }
 
-        val avgCmc = if (nonLandCount > 0) cmcSum / nonLandCount else 0.0
         return DeckRoleCounts(
             playableTotal = playableTotal,
             lands = lands,
             threats = threats,
             interaction = interaction,
             drawAndRamp = drawAndRamp,
-            avgCmc = avgCmc
+            avgCmc = if (nonLandCount > 0) cmcSum / nonLandCount else null
         )
     }
 
     private fun scoreArchetypes(
         playable: List<DeckEntryWithCard>,
-        playableTotal: Int,
-        avgCmc: Double
-    ): List<ArchetypeMatchResult> {
-        val uniqueNonLand = playable.filter { "land" !in it.card.typeLine.lowercase() || "tutor" in it.card.synergyTags.lowercase() }
-        val deckNames = playable.map { it.card.name }.toSet()
-
-        return commonArchetypes.map { template ->
-            val matchedCards = linkedSetOf<String>()
-            val matchedTags = linkedSetOf<String>()
+        avgCmc: Double?
+    ): List<ArchetypeMatchResult> =
+        commonArchetypes.map { template ->
+            val matchedCards = mutableListOf<String>()
+            var benchmarkHits = 0
             var weightedPoints = 0.0
             var totalWeight = 0.0
 
             playable.forEach { item ->
                 val card = item.card
-                val qtyWeight = item.entry.quantity.coerceAtMost(4).toDouble()
-                val tags = card.synergyTags.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                val keywords = card.keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                val tagHits = tags.filter { it in template.signatureTags }
-                val kwHits = keywords.filter { it in template.signatureKeywords }
+                val tagHits = card.synergyTags.split(',').count { it.trim() in template.signatureTags }
+                val keywordHits = card.keywords.split(',').count { it.trim() in template.signatureKeywords }
                 val benchmarkHit = card.name in template.benchmarkCards
 
-                if ("land" !in card.typeLine.lowercase() || benchmarkHit || tagHits.isNotEmpty()) {
-                    totalWeight += qtyWeight
-                    var cardScore = 0.0
-                    if (tagHits.isNotEmpty()) {
-                        cardScore += (tagHits.size * 0.45).coerceAtMost(1.0)
-                        matchedTags.addAll(tagHits)
-                    }
-                    if (kwHits.isNotEmpty()) {
-                        cardScore += (kwHits.size * 0.35).coerceAtMost(0.75)
-                    }
-                    if (benchmarkHit) {
-                        cardScore += 0.65
-                    }
-                    if (cardScore > 0.0) {
-                        matchedCards.add(card.name)
-                    }
-                    weightedPoints += qtyWeight * cardScore.coerceAtMost(1.25)
+                if ("land" !in card.frontTypes || benchmarkHit || tagHits > 0 || keywordHits > 0) {
+                    val weight = item.entry.quantity.coerceAtMost(4)
+                    val cardPoints = (tagHits * 0.45).coerceAtMost(1.0) +
+                        (keywordHits * 0.35).coerceAtMost(0.75) +
+                        if (benchmarkHit) 0.65 else 0.0
+                    if (cardPoints > 0.0) matchedCards.add(card.name)
+                    if (benchmarkHit) benchmarkHits++
+                    totalWeight += weight
+                    weightedPoints += weight * cardPoints.coerceAtMost(1.25)
                 }
             }
 
-            // Benchmark presence bonus + CMC proximity
-            val benchmarkHits = template.benchmarkCards.count { it in deckNames }
             val benchmarkBonus = (benchmarkHits * 6.5).coerceAtMost(26.0)
-            val cmcDiff = abs(avgCmc - template.idealAvgCmc)
-            val cmcBonus = if (playableTotal > 0) (14.0 - cmcDiff * 8.0).coerceIn(0.0, 14.0) else 0.0
+            val curveBonus = avgCmc?.let { (14.0 - abs(it - template.idealAvgCmc) * 8.0).coerceIn(0.0, 14.0) } ?: 0.0
+            val ratioPoints = if (totalWeight > 0) (weightedPoints / totalWeight * 72.0).coerceAtMost(72.0) else 0.0
+            ArchetypeMatchResult(template, ratioPoints + benchmarkBonus + curveBonus, matchedCards)
+        }.sortedWith(compareByDescending<ArchetypeMatchResult> { it.hasEvidence }.thenByDescending { it.ranking })
 
-            val ratioScore = if (totalWeight > 0.0) {
-                ((weightedPoints / totalWeight) * 72.0).coerceIn(0.0, 72.0)
-            } else 0.0
-
-            val totalScore = if (uniqueNonLand.isEmpty() && playableTotal == 0) {
-                0
-            } else {
-                (ratioScore + benchmarkBonus + cmcBonus).toInt().coerceIn(5, 99)
-            }
-
-            ArchetypeMatchResult(
-                template = template,
-                matchScore = totalScore,
-                matchedCards = matchedCards.toList(),
-                matchedTags = matchedTags.toList()
-            )
-        }.sortedByDescending { it.matchScore }
-    }
-
-    private fun discoverRelationships(playable: List<DeckEntryWithCard>): List<CardRelationship> {
-        val uniqueCards = playable
-            .map { it.card }
-            .distinctBy { it.id }
-            .filter { card ->
-                val isBasicLand = card.name in setOf("Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes")
-                !isBasicLand
-            }
+    private fun discoverRelationships(
+        cards: List<CardEntity>,
+        inLibrary: Set<String>
+    ): List<CardRelationship> {
+        val uniqueCards = cards.filter { "basic" !in it.frontTypes || "land" !in it.frontTypes }
 
         val relationships = mutableListOf<CardRelationship>()
         val seenPairs = mutableSetOf<String>()
@@ -604,7 +563,9 @@ object SynergyAnalyzerEngine {
         curatedPairRules.forEach { rule ->
             val cardA = byName[rule.nameA.lowercase()]
             val cardB = byName[rule.nameB.lowercase()]
-            if (cardA != null && cardB != null && cardA.id != cardB.id) {
+            if (cardA != null && cardB != null && cardA.id != cardB.id &&
+                (rule.type != RelationshipType.TUTOR_TARGET || cardB.id in inLibrary)
+            ) {
                 val key = pairKey(cardA, cardB)
                 if (seenPairs.add(key)) {
                     relationships.add(
@@ -630,7 +591,9 @@ object SynergyAnalyzerEngine {
                 val key = pairKey(a, b)
                 if (key in seenPairs) continue
 
-                val dynamic = evaluateDynamicPair(a, b)
+                val dynamic = tutorRelationship(a, b, key, inLibrary)
+                    ?: tutorRelationship(b, a, key, inLibrary)
+                    ?: evaluateDynamicPair(a, b, key)
                 if (dynamic != null) {
                     seenPairs.add(key)
                     relationships.add(dynamic)
@@ -644,43 +607,61 @@ object SynergyAnalyzerEngine {
                     .thenBy { it.type.ordinal }
                     .thenBy { it.cardA.name }
             )
-            .take(32)
     }
 
-    private fun evaluateDynamicPair(a: CardEntity, b: CardEntity): CardRelationship? {
-        val key = if (a.id <= b.id) "${a.id}|${b.id}" else "${b.id}|${a.id}"
+    private val artifactSearch = Regex(
+        """search your library for an artifact card(?: with mana value (x|[0-9]+)( or less| or greater)?)?, (reveal (?:it|that card), put (?:it|that card) into your hand|put (?:it|that card) onto the battlefield)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun tutorRelationship(
+        tutor: CardEntity,
+        target: CardEntity,
+        key: String,
+        inLibrary: Set<String>
+    ): CardRelationship? {
+        if ("artifact" !in target.frontTypes || target.id !in inLibrary) return null
+        val search = artifactSearch.find(tutor.oracleText) ?: return null
+        val (_, value, comparison, destination) = search.groupValues
+        val threshold = value.toDoubleOrNull()
+        val eligible = when {
+            value.isEmpty() -> true
+            value.equals("x", ignoreCase = true) -> comparison.equals(" or less", ignoreCase = true)
+            threshold == null -> false
+            comparison.equals(" or less", ignoreCase = true) -> target.cmc <= threshold
+            comparison.equals(" or greater", ignoreCase = true) -> target.cmc >= threshold
+            else -> target.cmc == threshold
+        }
+        if (!eligible) return null
+
+        val condition = when {
+            value.equals("x", ignoreCase = true) -> "When the search effect resolves with X at least ${target.cmc.toInt()}"
+            tutor.name == "Inventors' Fair" -> "If you control at least three artifacts and activate ${tutor.name}"
+            else -> "When ${tutor.name}'s search effect resolves"
+        }
+        val destinationText = if (destination.startsWith("reveal", ignoreCase = true)) {
+            "into your hand"
+        } else {
+            "onto the battlefield"
+        }
+        return CardRelationship(
+            id = key,
+            cardA = tutor,
+            cardB = target,
+            type = RelationshipType.TUTOR_TARGET,
+            strength = 2,
+            title = "Artifact Tutor",
+            explanation = "$condition, it can put ${target.name} from your library $destinationText."
+        )
+    }
+
+    private fun evaluateDynamicPair(a: CardEntity, b: CardEntity, key: String): CardRelationship? {
         val oracleA = a.oracleText.lowercase()
         val oracleB = b.oracleText.lowercase()
-        val typeA = a.typeLine.lowercase()
-        val typeB = b.typeLine.lowercase()
+        val typeA = a.frontTypes
+        val typeB = b.frontTypes
         val tagsA = a.synergyTags.split(",").map { it.trim() }.filter { it.isNotEmpty() && it != "Land" }.toSet()
         val tagsB = b.synergyTags.split(",").map { it.trim() }.filter { it.isNotEmpty() && it != "Land" }.toSet()
-
-        // Artifact tutor -> high-impact artifact
-        val aArtifactTutor = "search your library for an artifact" in oracleA
-        val bArtifactTutor = "search your library for an artifact" in oracleB
-        if (aArtifactTutor && "artifact" in typeB && b.cmc >= 3.0) {
-            return CardRelationship(
-                id = key,
-                cardA = a,
-                cardB = b,
-                type = RelationshipType.TUTOR_TARGET,
-                strength = 2,
-                title = "Artifact Tutor Line",
-                explanation = "${a.name} can search directly for ${b.name} to assemble your artifact plan on demand."
-            )
-        }
-        if (bArtifactTutor && "artifact" in typeA && a.cmc >= 3.0) {
-            return CardRelationship(
-                id = key,
-                cardA = b,
-                cardB = a,
-                type = RelationshipType.TUTOR_TARGET,
-                strength = 2,
-                title = "Artifact Tutor Line",
-                explanation = "${b.name} can search directly for ${a.name} to assemble your artifact plan on demand."
-            )
-        }
 
         // Cost reducer -> high-CMC artifact
         val aReducesArtifact = "artifact spells you cast cost" in oracleA
@@ -693,7 +674,7 @@ object SynergyAnalyzerEngine {
                 type = RelationshipType.CURVE_SYNERGY,
                 strength = 2,
                 title = "Artifact Cost Discount",
-                explanation = "${a.name} shaves mana off ${b.name}, letting you deploy heavy artifacts a turn earlier."
+                explanation = "${a.name} shaves mana off ${b.name}, if its cost includes generic mana."
             )
         }
         if (bReducesArtifact && "artifact" in typeA && a.cmc >= 4.0) {
@@ -704,7 +685,7 @@ object SynergyAnalyzerEngine {
                 type = RelationshipType.CURVE_SYNERGY,
                 strength = 2,
                 title = "Artifact Cost Discount",
-                explanation = "${b.name} shaves mana off ${a.name}, letting you deploy heavy artifacts a turn earlier."
+                explanation = "${b.name} shaves mana off ${a.name}, if its cost includes generic mana."
             )
         }
 
@@ -719,7 +700,7 @@ object SynergyAnalyzerEngine {
                 type = RelationshipType.CURVE_SYNERGY,
                 strength = 2,
                 title = "Cheap Spell Trigger",
-                explanation = "Casting ${b.name} for ${b.cmc.toInt()} mana triggers ${a.name}'s noncreature payoff cleanly on curve."
+                explanation = "Casting ${b.name} for ${b.cmc.toInt()} mana triggers ${a.name}'s noncreature payoff while ${a.name} is on the battlefield."
             )
         }
         if (bProwess && ("instant" in typeA || "sorcery" in typeA) && a.cmc <= 2.0) {
@@ -730,7 +711,7 @@ object SynergyAnalyzerEngine {
                 type = RelationshipType.CURVE_SYNERGY,
                 strength = 2,
                 title = "Cheap Spell Trigger",
-                explanation = "Casting ${a.name} for ${a.cmc.toInt()} mana triggers ${b.name}'s noncreature payoff cleanly on curve."
+                explanation = "Casting ${a.name} for ${a.cmc.toInt()} mana triggers ${b.name}'s noncreature payoff while ${b.name} is on the battlefield."
             )
         }
 
@@ -747,7 +728,7 @@ object SynergyAnalyzerEngine {
                 type = RelationshipType.PROTECTION_PAYOFF,
                 strength = 2,
                 title = "Wincon Shield",
-                explanation = "${a.name} protects ${b.name} from opposing removal or stack interaction when closing the game."
+                explanation = "${a.name} may help protect ${b.name} if its effect applies to the opposing spell or ability."
             )
         }
         if (bProtects && aPayoff && !bPayoff) {
@@ -758,7 +739,7 @@ object SynergyAnalyzerEngine {
                 type = RelationshipType.PROTECTION_PAYOFF,
                 strength = 2,
                 title = "Wincon Shield",
-                explanation = "${b.name} protects ${a.name} from opposing removal or stack interaction when closing the game."
+                explanation = "${b.name} may help protect ${a.name} if its effect applies to the opposing spell or ability."
             )
         }
 
@@ -788,7 +769,12 @@ object SynergyAnalyzerEngine {
             )
         }
 
-        // Shared deep synergy (2+ shared tactical tags)
+        // Shared tags alone do not establish a failed or unsupported tutor line.
+        val hasArtifactSearch = "search your library for an artifact card"
+        if (hasArtifactSearch in oracleA && "artifact" in typeB ||
+            hasArtifactSearch in oracleB && "artifact" in typeA
+        ) return null
+
         val shared = tagsA.intersect(tagsB)
         if (shared.size >= 2) {
             val strength = if (shared.size >= 3) 2 else 1
@@ -804,48 +790,10 @@ object SynergyAnalyzerEngine {
                 type = type,
                 strength = strength,
                 title = "Shared ${shared.take(2).joinToString(" + ")} Core",
-                explanation = "${a.name} and ${b.name} reinforce the same ${shared.joinToString(", ")} axis inside your deck."
+                explanation = "${a.name} and ${b.name} share these deck roles: ${shared.joinToString(", ")}."
             )
         }
 
         return null
-    }
-
-    private fun buildDeckNodes(
-        playable: List<DeckEntryWithCard>,
-        relationships: List<CardRelationship>
-    ): List<DeckCardNode> {
-        val degreeMap = mutableMapOf<String, Int>()
-        val strengthMap = mutableMapOf<String, Int>()
-
-        relationships.forEach { rel ->
-            degreeMap[rel.cardA.id] = (degreeMap[rel.cardA.id] ?: 0) + 1
-            degreeMap[rel.cardB.id] = (degreeMap[rel.cardB.id] ?: 0) + 1
-            strengthMap[rel.cardA.id] = (strengthMap[rel.cardA.id] ?: 0) + rel.strength
-            strengthMap[rel.cardB.id] = (strengthMap[rel.cardB.id] ?: 0) + rel.strength
-        }
-
-        val uniqueEntries = playable
-            .filter { it.card.name !in setOf("Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes") }
-            .groupBy { it.card.id }
-            .map { (_, items) ->
-                val card = items.first().card
-                val qty = items.sumOf { it.entry.quantity }
-                val tags = card.synergyTags.split(",").map { it.trim() }.filter { it.isNotEmpty() && it != "Land" }
-                val roleLabel = tags.firstOrNull() ?: card.typeLine.substringBefore("—").trim()
-                DeckCardNode(
-                    card = card,
-                    quantity = qty,
-                    roleLabel = roleLabel,
-                    connectionCount = degreeMap[card.id] ?: 0,
-                    totalStrength = strengthMap[card.id] ?: 0
-                )
-            }
-
-        return uniqueEntries.sortedWith(
-            compareByDescending<DeckCardNode> { it.totalStrength }
-                .thenByDescending { it.connectionCount }
-                .thenBy { it.card.name }
-        )
     }
 }

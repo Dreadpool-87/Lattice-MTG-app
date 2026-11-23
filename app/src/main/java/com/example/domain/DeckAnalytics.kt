@@ -1,6 +1,7 @@
 package com.example.domain
 
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
@@ -72,10 +73,11 @@ object DeckAnalytics {
         playable.forEach { item ->
             val qty = item.entry.quantity
             val card = item.card
-            val typeLower = card.typeLine.lowercase()
+            if (card.isUnresolvedForAnalysis) return@forEach
+            val typesOnFront = card.frontTypes
 
             when {
-                "land" in typeLower -> {
+                "land" in typesOnFront -> {
                     landCount += qty
                     types["Land"] = (types["Land"] ?: 0) + qty
                 }
@@ -86,12 +88,12 @@ object DeckAnalytics {
                     curve[bucket] = (curve[bucket] ?: 0) + qty
 
                     when {
-                        "creature" in typeLower -> types["Creature"] = (types["Creature"] ?: 0) + qty
-                        "planeswalker" in typeLower -> types["Planeswalker"] = (types["Planeswalker"] ?: 0) + qty
-                        "instant" in typeLower -> types["Instant"] = (types["Instant"] ?: 0) + qty
-                        "sorcery" in typeLower -> types["Sorcery"] = (types["Sorcery"] ?: 0) + qty
-                        "artifact" in typeLower -> types["Artifact"] = (types["Artifact"] ?: 0) + qty
-                        "enchantment" in typeLower -> types["Enchantment"] = (types["Enchantment"] ?: 0) + qty
+                        "creature" in typesOnFront -> types["Creature"] = (types["Creature"] ?: 0) + qty
+                        "planeswalker" in typesOnFront -> types["Planeswalker"] = (types["Planeswalker"] ?: 0) + qty
+                        "instant" in typesOnFront -> types["Instant"] = (types["Instant"] ?: 0) + qty
+                        "sorcery" in typesOnFront -> types["Sorcery"] = (types["Sorcery"] ?: 0) + qty
+                        "artifact" in typesOnFront -> types["Artifact"] = (types["Artifact"] ?: 0) + qty
+                        "enchantment" in typesOnFront -> types["Enchantment"] = (types["Enchantment"] ?: 0) + qty
                     }
                 }
             }
@@ -167,18 +169,6 @@ object DeckAnalytics {
         )
     }
 
-    private fun canonicalCardIdentityKey(
-        card: CardEntity,
-        oracleByNormalizedName: Map<String, String>
-    ): String {
-        val directOracle = card.oracleId.trim().lowercase()
-        if (directOracle.isNotEmpty()) return "oracle:$directOracle"
-        val normalizedName = card.name.trim().lowercase()
-        val linkedOracle = oracleByNormalizedName[normalizedName]
-        if (!linkedOracle.isNullOrEmpty()) return "oracle:$linkedOracle"
-        return "name:$normalizedName"
-    }
-
     private fun isUnlimitedCopyCard(card: CardEntity): Boolean {
         val trimmedName = card.name.trim()
         if (trimmedName in basicLandNames || trimmedName.startsWith("Snow-Covered ") && trimmedName.removePrefix("Snow-Covered ") in basicLandNames) {
@@ -190,12 +180,6 @@ object DeckAnalytics {
         }
         val oracleLower = card.oracleText.lowercase()
         return "a deck can have any number of cards named" in oracleLower
-    }
-
-    private fun isUnresolvedCard(card: CardEntity): Boolean {
-        return card.metadataStatus == com.example.data.local.CardMetadataStatus.UNRESOLVED ||
-            card.legalFormats.equals("Unknown", ignoreCase = true) ||
-            card.legalFormats.isBlank()
     }
 
     private fun validateDeck(
@@ -210,12 +194,7 @@ object DeckAnalytics {
         val isCasual = format.equals("Casual", ignoreCase = true)
 
         val allEntries = deckWithEntries.entries
-        val oracleByNormalizedName = allEntries
-            .mapNotNull { item ->
-                val oracle = item.card.oracleId.trim().lowercase()
-                if (oracle.isNotEmpty()) item.card.name.trim().lowercase() to oracle else null
-            }
-            .toMap()
+        val oracleByNormalizedName = allEntries.oracleIdsByName()
 
         // 1. Deck / Zone Size Check
         if (isCommander) {
@@ -328,7 +307,7 @@ object DeckAnalytics {
             .map { it.card }
             .distinctBy { it.id }
 
-        val unresolvedCards = activeDeckCards.filter { isUnresolvedCard(it) }
+        val unresolvedCards = activeDeckCards.filter { it.isUnresolvedForAnalysis }
         if (unresolvedCards.isNotEmpty()) {
             notes.add(
                 ValidationNote(
@@ -343,7 +322,7 @@ object DeckAnalytics {
         val checkedSnapshot = !isCasual && format.isNotBlank()
         if (checkedSnapshot) {
             val notLegalCached = activeDeckCards.filter { card ->
-                !isUnresolvedCard(card) &&
+                !card.isUnresolvedForAnalysis &&
                     !card.isCustom &&
                     card.legalFormats
                         .split(",")
@@ -458,4 +437,34 @@ object DeckAnalytics {
     fun formatListForPreview(cards: List<CardEntity>): String {
         return cards.joinToString(", ") { it.name }
     }
+}
+
+
+internal val CardEntity.isUnresolvedForAnalysis: Boolean
+    get() = metadataStatus == CardMetadataStatus.UNRESOLVED ||
+        legalFormats.equals("Unknown", ignoreCase = true) ||
+        legalFormats.isBlank()
+
+private val typeSeparator = Regex("""\s+""")
+
+// Count front-face lands in the land odds and keep a spell with a land back face in the curve.
+internal val CardEntity.frontTypes: List<String>
+    get() = typeLine.substringBefore("//").substringBefore("—").trim().lowercase().split(typeSeparator)
+
+internal fun List<DeckEntryWithCard>.oracleIdsByName(): Map<String, String> =
+    mapNotNull { item ->
+        val oracle = item.card.oracleId.trim().lowercase()
+        if (oracle.isNotEmpty()) item.card.name.trim().lowercase() to oracle else null
+    }.toMap()
+
+internal fun canonicalCardIdentityKey(
+    card: CardEntity,
+    oracleByNormalizedName: Map<String, String>
+): String {
+    val directOracle = card.oracleId.trim().lowercase()
+    if (directOracle.isNotEmpty()) return "oracle:$directOracle"
+    val normalizedName = card.name.trim().lowercase()
+    val linkedOracle = oracleByNormalizedName[normalizedName]
+    if (!linkedOracle.isNullOrEmpty()) return "oracle:$linkedOracle"
+    return "name:$normalizedName"
 }

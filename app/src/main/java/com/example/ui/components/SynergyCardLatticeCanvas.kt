@@ -42,7 +42,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.domain.CardRelationship
-import com.example.domain.DeckCardNode
 import com.example.domain.RelationshipType
 import com.example.ui.theme.ArcaneCyan
 import com.example.ui.theme.BurnishedGold
@@ -61,6 +60,7 @@ fun colorForRelationshipType(type: RelationshipType): Color {
         RelationshipType.ENGINE_ENABLER -> BurnishedGold
         RelationshipType.TUTOR_TARGET -> ArcaneCyan
         RelationshipType.PROTECTION_PAYOFF -> ManaBlueBg
+        RelationshipType.COMBAT_SYNERGY -> Color(0xFFFF9D82)
         RelationshipType.CURVE_SYNERGY -> SlateMuted
     }
 }
@@ -68,27 +68,19 @@ fun colorForRelationshipType(type: RelationshipType): Color {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SynergyCardLatticeCanvas(
-    nodes: List<DeckCardNode>,
     relationships: List<CardRelationship>,
     selectedCardId: String?,
     onSelectCard: (String?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val visibleNodes = nodes.take(8)
-    val connectedPartnerIds = if (selectedCardId == null) {
-        emptySet()
-    } else {
-        relationships.flatMap { rel ->
-            when (selectedCardId) {
-                rel.cardA.id -> listOf(rel.cardB.id)
-                rel.cardB.id -> listOf(rel.cardA.id)
-                else -> emptyList()
-            }
-        }.toSet()
-    }
+    val cards = relationships.flatMap { listOf(it.cardA, it.cardB) }.distinctBy { it.id }
+    val connections = relationships
+        .flatMap { listOf(it.cardA.id, it.cardB.id) }
+        .groupingBy { it }
+        .eachCount()
 
     Column(modifier = modifier.fillMaxWidth()) {
-        if (visibleNodes.isEmpty()) {
+        if (cards.isEmpty()) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -99,7 +91,7 @@ fun SynergyCardLatticeCanvas(
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "Add non-land spells to illuminate card-to-card synergy links.",
+                    text = "No links match the current selection.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -130,11 +122,11 @@ fun SynergyCardLatticeCanvas(
             val rx = widthPx * 0.35f
             val ry = heightPx * 0.34f
 
-            val nodeOffsets = visibleNodes.mapIndexed { index, node ->
-                val angle = (2.0 * PI * index / visibleNodes.size) - (PI / 2.0)
+            val nodeOffsets = cards.mapIndexed { index, node ->
+                val angle = (2.0 * PI * index / cards.size) - (PI / 2.0)
                 val x = cx + (rx * cos(angle)).toFloat()
                 val y = cy + (ry * sin(angle)).toFloat()
-                node.card.id to Offset(x, y)
+                node.id to Offset(x, y)
             }.toMap()
 
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -156,19 +148,12 @@ fun SynergyCardLatticeCanvas(
                 relationships.forEach { rel ->
                     val pA = nodeOffsets[rel.cardA.id] ?: return@forEach
                     val pB = nodeOffsets[rel.cardB.id] ?: return@forEach
-                    val isFocused = selectedCardId == null ||
-                        rel.cardA.id == selectedCardId ||
-                        rel.cardB.id == selectedCardId
-                    val edgeColor = colorForRelationshipType(rel.type)
                     drawLine(
-                        color = if (isFocused) {
-                            edgeColor.copy(alpha = (0.5f + rel.strength * 0.16f).coerceAtMost(0.95f))
-                        } else {
-                            Color.White.copy(alpha = 0.08f)
-                        },
+                        color = colorForRelationshipType(rel.type)
+                            .copy(alpha = (0.5f + rel.strength * 0.16f).coerceAtMost(0.95f)),
                         start = pA,
                         end = pB,
-                        strokeWidth = if (isFocused) (2.2f + rel.strength * 1.6f) else 1.2f,
+                        strokeWidth = 2.2f + rel.strength * 1.6f,
                         cap = StrokeCap.Round
                     )
                 }
@@ -190,19 +175,16 @@ fun SynergyCardLatticeCanvas(
             val chipHalfWidthPx = with(density) { 48.dp.toPx() }
             val chipHalfHeightPx = with(density) { 24.dp.toPx() }
 
-            visibleNodes.forEach { node ->
-                val center = nodeOffsets[node.card.id] ?: return@forEach
-                val isSelected = selectedCardId == node.card.id
-                val isNeighbor = node.card.id in connectedPartnerIds
-                val isDimmed = selectedCardId != null && !isSelected && !isNeighbor
-                val shortLabel = node.card.name
+            cards.forEach { node ->
+                val center = nodeOffsets[node.id] ?: return@forEach
+                val isSelected = selectedCardId == node.id
+                val shortLabel = node.name
                     .substringBefore(",")
                     .let { if (it.length > 13) it.take(12) + "…" else it }
 
                 Surface(
                     color = when {
                         isSelected -> LatticeSparkGreen
-                        isNeighbor -> Color(0xFF1F3828)
                         else -> Color(0xE6131C18)
                     },
                     shape = RoundedCornerShape(14.dp),
@@ -210,8 +192,6 @@ fun SynergyCardLatticeCanvas(
                         width = if (isSelected) 2.dp else 1.dp,
                         color = when {
                             isSelected -> Color.White
-                            isNeighbor -> LatticeSparkGreen
-                            isDimmed -> Color.White.copy(alpha = 0.15f)
                             else -> LatticeSparkGreen.copy(alpha = 0.45f)
                         }
                     ),
@@ -224,8 +204,8 @@ fun SynergyCardLatticeCanvas(
                         }
                         .widthIn(min = 84.dp, max = 104.dp)
                         .minimumInteractiveComponentSize()
-                        .clickable { onSelectCard(node.card.id) }
-                        .testTag("lattice_node_${node.card.id}")
+                        .clickable { onSelectCard(node.id) }
+                        .testTag("lattice_node_${node.id}")
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -237,18 +217,16 @@ fun SynergyCardLatticeCanvas(
                             fontWeight = FontWeight.Bold,
                             color = when {
                                 isSelected -> LatticeForestBase
-                                isDimmed -> Color.White.copy(alpha = 0.45f)
                                 else -> Color(0xFFF3EFE6)
                             },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "${node.connectionCount} links",
+                            text = "${connections.getValue(node.id)} links",
                             style = MaterialTheme.typography.labelSmall,
                             color = when {
                                 isSelected -> LatticeForestBase.copy(alpha = 0.8f)
-                                isDimmed -> Color.White.copy(alpha = 0.35f)
                                 else -> LatticeSparkGreen
                             }
                         )
@@ -264,7 +242,7 @@ fun SynergyCardLatticeCanvas(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            RelationshipType.entries.forEach { relType ->
+            relationships.map { it.type }.distinct().forEach { relType ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier

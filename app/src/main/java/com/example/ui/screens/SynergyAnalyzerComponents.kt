@@ -211,40 +211,19 @@ internal fun ArchetypeAffinityCard(
             verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.padding(12.dp)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = match.template.category.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isSelected) LatticeSparkGreen else MaterialTheme.colorScheme.secondary
-                )
-                Text(
-                    text = "${match.matchScore}%",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSelected) LatticeSparkGreen else MaterialTheme.colorScheme.primary
-                )
-            }
+            Text(
+                text = match.template.category,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isSelected) LatticeSparkGreen else MaterialTheme.colorScheme.secondary
+            )
             Text(
                 text = match.template.name,
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            LinearProgressIndicator(
-                progress = { (match.matchScore / 100f).coerceIn(0f, 1f) },
-                color = if (isSelected) LatticeSparkGreen else MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-            )
             Text(
-                text = "${match.matchedCards.size} matching cards",
+                text = if (match.hasEvidence) "${match.matchedCards.size} matching cards" else "Insufficient evidence",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -256,7 +235,6 @@ internal fun ArchetypeAffinityCard(
 @Composable
 internal fun ArchetypeBlueprintCard(
     template: ArchetypeTemplate,
-    matchResult: ArchetypeMatchResult,
     roles: DeckRoleCounts,
     deckCardNames: Set<String>
 ) {
@@ -276,33 +254,16 @@ internal fun ArchetypeBlueprintCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(16.dp)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "${template.name} Blueprint",
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    Text(
-                        text = "${template.category} • Target Avg CMC ${template.idealAvgCmc}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = LatticeSparkGreen
-                    )
-                }
-                Surface(
-                    color = LatticeSparkContainer,
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text(
-                        text = "${matchResult.matchScore}% Fit",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = LatticeSparkGreen,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
+            Column {
+                Text(
+                    text = "${template.name} Blueprint",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Text(
+                    text = "${template.category} • Target avg. mana value ${template.idealAvgCmc}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LatticeSparkGreen
+                )
             }
 
             Text(
@@ -351,7 +312,7 @@ internal fun ArchetypeBlueprintCard(
             RoleComparisonBar("Draw / Ramp / Tutors", roles.drawAndRamp, targetDrawRamp)
 
             Text(
-                text = "Archetype Pillars (Highlighted = In Your Deck)",
+                text = "Archetype Pillars (Highlighted = Analyzed Cards)",
                 style = MaterialTheme.typography.titleSmall
             )
             FlowRow(
