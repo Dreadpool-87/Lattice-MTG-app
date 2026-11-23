@@ -128,7 +128,7 @@ object DelverCsvImporter {
         val header = records.first().map { it.trim().lowercase() }
         val colQty = findHeaderIndex(header, setOf("quantity", "qty", "count", "reg qty", "regular quantity", "amount"))
         val colName = findHeaderIndex(header, setOf("name", "card", "card name"))
-        val colSet = findHeaderIndex(header, setOf("edition code", "set code", "edition", "set"))
+        val colSet = findHeaderIndex(header, setOf("edition (code)", "edition code", "set code", "edition", "set"))
         val colNumber = findHeaderIndex(header, setOf("collector's number", "collector number", "card number", "number", "cn"))
         val colLang = findHeaderIndex(header, setOf("language", "lang", "language code"))
         val colScryfallId = findHeaderIndex(header, setOf("scryfall id", "scryfall_id", "printing id", "scryfall printing id", "id"))
