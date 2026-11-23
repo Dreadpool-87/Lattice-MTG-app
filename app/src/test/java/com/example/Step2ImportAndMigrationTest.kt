@@ -483,7 +483,10 @@ class Step2ImportAndMigrationTest {
             assertEquals(2, report!!.totalVerifiedCopies)
             assertEquals(1, report.conflictRows.size)
             assertEquals("My cards", report.collectionName)
-            assertEquals(2, db.vaultCollectionDao().observeCards().first().single().entry.quantity)
+            composeRule.waitUntil(timeoutMillis = 8_000) {
+                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                viewModel.collections.value["My cards"]?.singleOrNull()?.entry?.quantity == 2
+            }
             composeRule.onNodeWithTag("csv_verified_summary")
                 .performScrollTo()
                 .assertIsDisplayed()
