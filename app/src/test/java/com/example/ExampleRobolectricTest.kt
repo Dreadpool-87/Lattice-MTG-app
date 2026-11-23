@@ -3,9 +3,19 @@ package com.example
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.example.data.local.DeckEntity
+import com.example.data.local.DeckEntryEntity
+import com.example.data.local.DeckZones
 import com.example.data.local.LatticeDatabase
+import com.example.data.local.StarterCards
 import com.example.data.local.StarterDecks
+import com.example.data.remote.ScryfallApi
+import com.example.data.remote.ScryfallCardDto
+import com.example.data.remote.ScryfallSearchResponse
+import com.example.data.repository.CardRepository
+import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
+import com.example.data.repository.SyncResult
 import com.example.domain.DeckAnalytics
 import com.example.domain.RelationshipType
 import com.example.domain.SynergyAnalyzerEngine
@@ -17,6 +27,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,6 +64,141 @@ class ExampleRobolectricTest {
             val summary = DeckAnalytics.analyze(latticeDeck)
             assertTrue(summary.playableCount > 0)
             assertTrue(summary.synergyClusters.any { it.tag == "Artifact" })
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `syncing and restoring cards updates metadata in place without deleting deck entries or bookmarks`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            var syncVersion = 1
+            val fakeApi = object : ScryfallApi {
+                override suspend fun searchCards(query: String, order: String): ScryfallSearchResponse {
+                    val dto = ScryfallCardDto(
+                        id = "11111111-2222-3333-4444-555555555555",
+                        name = "Atraxa, Grand Unifier",
+                        manaCost = "{3}{G}{W}{U}{B}",
+                        cmc = 7.0,
+                        typeLine = "Legendary Creature — Phyrexian Angel",
+                        oracleText = if (syncVersion == 1) {
+                            "Flying, vigilance, deathtouch, lifelink. V1 oracle text."
+                        } else {
+                            "Flying, vigilance, deathtouch, lifelink. V2 updated oracle text."
+                        },
+                        colors = listOf("W", "U", "B", "G"),
+                        colorIdentity = listOf("W", "U", "B", "G"),
+                        rarity = "mythic",
+                        set = "ONE",
+                        setName = if (syncVersion == 1) "Phyrexia V1" else "Phyrexia: All Will Be One V2",
+                        power = "7",
+                        toughness = "7",
+                        legalities = mapOf("commander" to "legal", "modern" to "legal")
+                    )
+                    return ScryfallSearchResponse(data = listOf(dto))
+                }
+
+                override suspend fun getCardNamed(fuzzyName: String): ScryfallCardDto {
+                    error("Unused in test")
+                }
+
+                override suspend fun getCardNamedExact(exactName: String): ScryfallCardDto {
+                    error("Unused in test")
+                }
+
+                override suspend fun getCardByScryfallId(scryfallId: String): ScryfallCardDto {
+                    error("Unused in test")
+                }
+
+                override suspend fun getCardBySetNumberLang(
+                    setCode: String,
+                    collectorNumber: String,
+                    lang: String
+                ): ScryfallCardDto {
+                    error("Unused in test")
+                }
+
+                override suspend fun getCardBySetNumber(
+                    setCode: String,
+                    collectorNumber: String
+                ): ScryfallCardDto {
+                    error("Unused in test")
+                }
+
+                override suspend fun getCardRulings(scryfallId: String) =
+                    com.example.data.remote.ScryfallRulingsResponse()
+            }
+            val alwaysOnlineMonitor = object : NetworkMonitor(context) {
+                override fun isCurrentlyOnline(): Boolean = true
+            }
+            val repo = CardRepository(
+                cardDao = db.cardDao(),
+                scryfallApi = fakeApi,
+                networkMonitor = alwaysOnlineMonitor
+            )
+
+            // Sync #1 -> bookmark -> add to deck across multiple zones
+            val firstSync = repo.syncFromScryfall("Atraxa", offlineOnlyMode = false)
+            assertTrue(firstSync is SyncResult.Success)
+            val cardId = "sf-11111111-2222-3333-4444-555555555555"
+            val initialCard = db.cardDao().getCardById(cardId)
+            assertNotNull(initialCard)
+            assertEquals("Phyrexia V1", initialCard?.setName)
+
+            repo.toggleBookmark(cardId, current = false)
+            assertTrue(db.cardDao().getCardById(cardId)?.isBookmarked == true)
+
+            val deckId = db.deckDao().insertDeck(
+                DeckEntity(
+                    name = "Sync Regression Deck",
+                    format = "Commander",
+                    description = "Verifies FK survival across card refreshes",
+                    colorIdentity = "W,U,B,G"
+                )
+            )
+            db.deckDao().insertEntries(
+                listOf(
+                    DeckEntryEntity(deckId = deckId, cardId = cardId, quantity = 1, zone = DeckZones.COMMANDER),
+                    DeckEntryEntity(deckId = deckId, cardId = cardId, quantity = 3, zone = DeckZones.SIDEBOARD)
+                )
+            )
+
+            // Sync #2 with updated metadata on same card ID
+            syncVersion = 2
+            val secondSync = repo.syncFromScryfall("Atraxa", offlineOnlyMode = false)
+            assertTrue(secondSync is SyncResult.Success)
+
+            val updatedCard = db.cardDao().getCardById(cardId)
+            assertNotNull(updatedCard)
+            assertEquals(cardId, updatedCard?.id)
+            assertEquals("Phyrexia: All Will Be One V2", updatedCard?.setName)
+            assertTrue(updatedCard?.oracleText?.contains("V2 updated oracle text") == true)
+            assertTrue(updatedCard?.isBookmarked == true)
+
+            val deckAfterSecondSync = db.deckDao().getDeckWithEntriesOnce(deckId)
+            assertNotNull(deckAfterSecondSync)
+            assertEquals(2, deckAfterSecondSync!!.entries.size)
+            val commanderEntry = deckAfterSecondSync.entries.first { it.entry.zone == DeckZones.COMMANDER }
+            val sideboardEntry = deckAfterSecondSync.entries.first { it.entry.zone == DeckZones.SIDEBOARD }
+            assertEquals(1, commanderEntry.entry.quantity)
+            assertEquals(3, sideboardEntry.entry.quantity)
+
+            // Also verify restoreStarterCatalog updates in place without cascading deletes
+            val solRing = StarterCards.cards.first { it.id == "local-sol-ring" }
+            repo.restoreStarterCatalog()
+            repo.toggleBookmark(solRing.id, current = false)
+            db.deckDao().upsertEntry(
+                DeckEntryEntity(deckId = deckId, cardId = solRing.id, quantity = 2, zone = DeckZones.MAINBOARD)
+            )
+            repo.restoreStarterCatalog()
+            val solRingAfterRestore = db.cardDao().getCardById(solRing.id)
+            assertTrue(solRingAfterRestore?.isBookmarked == true)
+            val mainboardSolRing = db.deckDao().getEntry(deckId, solRing.id, DeckZones.MAINBOARD)
+            assertEquals(2, mainboardSolRing?.quantity)
         } finally {
             db.close()
         }

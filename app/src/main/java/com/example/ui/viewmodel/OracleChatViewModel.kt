@@ -36,6 +36,19 @@ sealed interface OracleReplyState {
     data class Error(val message: String) : OracleReplyState
 }
 
+data class DeckContextPreview(
+    val deckName: String,
+    val format: String,
+    val includedMainboardSlots: Int,
+    val totalMainboardSlots: Int,
+    val includedMainboardCopies: Int,
+    val totalMainboardCopies: Int,
+    val omittedSideboardCount: Int,
+    val omittedMaybeboardCount: Int,
+    val isPartialContext: Boolean,
+    val scopeSummary: String
+)
+
 data class OracleChatUiState(
     val messages: List<ChatMessageEntity> = emptyList(),
     val decks: List<DeckWithEntries> = emptyList(),
@@ -47,6 +60,9 @@ data class OracleChatUiState(
 ) {
     val selectedContextDeck: DeckWithEntries?
         get() = decks.firstOrNull { it.deck.id == selectedContextDeckId }
+
+    val deckContextPreview: DeckContextPreview?
+        get() = selectedContextDeck?.let(OracleChatViewModel::buildDeckContextPreview)
 }
 
 class OracleChatViewModel(
@@ -75,6 +91,7 @@ class OracleChatViewModel(
                 BEHAVIOR & CONTEXT:
                 - Remember prior turns in this conversation and build upon earlier answers.
                 - When an [ACTIVE DECK CONTEXT] block is provided, tailor your advice directly to the user's exact cards, commander, format, mana curve, and synergy tags.
+                - Respect [DECK CONTEXT COVERAGE]: if only a partial decklist is included, explicitly acknowledge what was omitted and NEVER claim to have validated the entire deck.
                 - Keep responses clear, well-structured, accurate to official MTG rules, and practical for players at the table.
                 """.trimIndent()
             )
@@ -110,7 +127,6 @@ class OracleChatViewModel(
         val online = values[5] as Boolean
         val offlineForced = values[6] as Boolean
 
-        // Default context to first deck if nothing chosen yet and decks exist
         val resolvedCtxId = if (ctxId != null && decks.any { it.deck.id == ctxId }) {
             ctxId
         } else {
@@ -171,6 +187,7 @@ class OracleChatViewModel(
         }
 
         val contextDeck = currentState.selectedContextDeck
+        val contextPreview = contextDeck?.let(::buildDeckContextPreview)
 
         viewModelScope.launch {
             replyState.value = OracleReplyState.Loading
@@ -190,14 +207,17 @@ class OracleChatViewModel(
                     ChatMessageEntity(
                         role = "user",
                         content = question,
-                        contextDeckName = contextDeck?.deck?.name
+                        contextDeckName = contextDeck?.deck?.name,
+                        isPartialContext = contextPreview?.isPartialContext == true,
+                        contextScopeNote = contextPreview?.scopeSummary
                     )
                 )
 
                 val promptWithContext = buildContextualPrompt(
                     question = question,
                     deck = contextDeck,
-                    vaultCount = currentState.vaultCardCount
+                    vaultCount = currentState.vaultCardCount,
+                    preview = contextPreview
                 )
 
                 val accumulated = StringBuilder()
@@ -217,7 +237,9 @@ class OracleChatViewModel(
                         ChatMessageEntity(
                             role = "model",
                             content = finalReply,
-                            contextDeckName = contextDeck?.deck?.name
+                            contextDeckName = contextDeck?.deck?.name,
+                            isPartialContext = contextPreview?.isPartialContext == true,
+                            contextScopeNote = contextPreview?.scopeSummary
                         )
                     )
                     replyState.value = OracleReplyState.Idle
@@ -243,9 +265,10 @@ class OracleChatViewModel(
     private fun buildContextualPrompt(
         question: String,
         deck: DeckWithEntries?,
-        vaultCount: Int
+        vaultCount: Int,
+        preview: DeckContextPreview?
     ): String {
-        if (deck == null) {
+        if (deck == null || preview == null) {
             return "[APP CONTEXT: User's local Room Card Vault has $vaultCount cached MTG cards. No specific deck selected.]\n\nUser Question: $question"
         }
 
@@ -253,22 +276,68 @@ class OracleChatViewModel(
         val commanderNames = deck.commanderEntries.joinToString(", ") { it.card.name }.ifEmpty { "None" }
         val mainList = deck.mainboardEntries
             .sortedBy { it.card.cmc }
-            .take(35)
+            .take(MAX_CONTEXT_MAINBOARD_SLOTS)
             .joinToString("; ") { "${it.entry.quantity}x ${it.card.name} (${it.card.manaCost.ifEmpty { "Land" }})" }
         val topTags = analytics.synergyClusters.take(5).joinToString(", ") { "${it.tag} (${it.totalCopies})" }
+        val coverageTag = if (preview.isPartialContext) "PARTIAL" else "COMPLETE"
+        val partialInstruction = if (preview.isPartialContext) {
+            "\nContext Constraint: Only part of the decklist is attached. Do NOT claim to validate the full deck or format legality."
+        } else ""
 
         return """
             [ACTIVE DECK CONTEXT]
+            [DECK CONTEXT COVERAGE: $coverageTag]
+            Scope: ${preview.scopeSummary}$partialInstruction
             Deck Name: ${deck.deck.name}
             Format: ${deck.deck.format}
             Color Identity: ${deck.resolvedColorIdentity.joinToString(",").ifEmpty { "Colorless" }}
             Commander: $commanderNames
             Playable Cards: ${analytics.playableCount} (${analytics.landCount} lands, Avg Non-Land CMC: ${"%.2f".format(analytics.averageCmc)})
             Top Synergy Clusters: ${topTags.ifEmpty { "None" }}
-            Key Cards: $mainList
+            Included Mainboard Cards: $mainList
 
             User Question: $question
         """.trimIndent()
+    }
+
+    companion object {
+        const val MAX_CONTEXT_MAINBOARD_SLOTS = 35
+
+        fun buildDeckContextPreview(deck: DeckWithEntries): DeckContextPreview {
+            val sortedMain = deck.mainboardEntries.sortedBy { it.card.cmc }
+            val includedMain = sortedMain.take(MAX_CONTEXT_MAINBOARD_SLOTS)
+            val totalMainCopies = sortedMain.sumOf { it.entry.quantity }
+            val includedMainCopies = includedMain.sumOf { it.entry.quantity }
+            val omittedMainSlots = (sortedMain.size - includedMain.size).coerceAtLeast(0)
+            val omittedSideboardCount = deck.sideboardCount
+            val omittedMaybeboardCount = deck.maybeboardEntries.sumOf { it.entry.quantity }
+
+            val isPartial = omittedMainSlots > 0 || omittedSideboardCount > 0 || omittedMaybeboardCount > 0
+            val excludedParts = buildList {
+                if (omittedMainSlots > 0) add("$omittedMainSlots remaining mainboard entries")
+                if (omittedSideboardCount > 0) add("$omittedSideboardCount sideboard cards")
+                if (omittedMaybeboardCount > 0) add("$omittedMaybeboardCount maybeboard cards")
+            }
+
+            val scopeSummary = if (isPartial) {
+                "Partial decklist sent (${includedMain.size}/${sortedMain.size} mainboard entries, $includedMainCopies/$totalMainCopies copies; omitted ${excludedParts.joinToString(", ")}). Replies are based only on included cards and do not validate the entire deck."
+            } else {
+                "Complete active mainboard sent (${sortedMain.size} entries, $totalMainCopies copies${if (deck.commanderEntries.isNotEmpty()) " + commander" else ""})."
+            }
+
+            return DeckContextPreview(
+                deckName = deck.deck.name,
+                format = deck.deck.format,
+                includedMainboardSlots = includedMain.size,
+                totalMainboardSlots = sortedMain.size,
+                includedMainboardCopies = includedMainCopies,
+                totalMainboardCopies = totalMainCopies,
+                omittedSideboardCount = omittedSideboardCount,
+                omittedMaybeboardCount = omittedMaybeboardCount,
+                isPartialContext = isPartial,
+                scopeSummary = scopeSummary
+            )
+        }
     }
 
     class Factory(

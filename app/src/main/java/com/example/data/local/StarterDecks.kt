@@ -3,7 +3,7 @@ package com.example.data.local
 object StarterDecks {
     suspend fun seedIfEmpty(cardDao: CardDao, deckDao: DeckDao) {
         if (cardDao.getCardCount() == 0) {
-            cardDao.insertAll(StarterCards.cards)
+            cardDao.upsertAllPreservingState(StarterCards.cards)
         }
         if (deckDao.getDeckCount() == 0) {
             val now = System.currentTimeMillis()

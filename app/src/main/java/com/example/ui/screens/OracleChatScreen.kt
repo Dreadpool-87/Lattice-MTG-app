@@ -27,8 +27,10 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -203,6 +206,64 @@ fun OracleChatScreen(
                             )
                         }
                     }
+
+                    uiState.deckContextPreview?.let { preview ->
+                        Surface(
+                            color = if (preview.isPartialContext) {
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+                            } else {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (preview.isPartialContext) {
+                                    MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+                                } else {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                                }
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("oracle_deck_context_disclosure")
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (preview.isPartialContext) Icons.Filled.Warning else Icons.Filled.Info,
+                                        contentDescription = null,
+                                        tint = if (preview.isPartialContext) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Sending \"${preview.deckName}\" (${preview.format}) deck info to Gemini when you ask.",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Text(
+                                    text = preview.scopeSummary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (preview.isPartialContext) {
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = if (preview.isPartialContext) {
+                                        Modifier.testTag("oracle_partial_deck_notice")
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -290,12 +351,15 @@ fun OracleChatScreen(
                     }
                     is OracleReplyState.Streaming -> {
                         item(key = "streaming_bubble") {
+                            val preview = uiState.deckContextPreview
                             ChatBubble(
                                 message = ChatMessageEntity(
                                     id = -1L,
                                     role = "model",
                                     content = state.partialText,
-                                    contextDeckName = uiState.selectedContextDeck?.deck?.name
+                                    contextDeckName = uiState.selectedContextDeck?.deck?.name,
+                                    isPartialContext = preview?.isPartialContext == true,
+                                    contextScopeNote = preview?.scopeSummary
                                 )
                             )
                         }
@@ -398,8 +462,9 @@ private fun ChatBubble(message: ChatMessageEntity) {
         modifier = Modifier.fillMaxWidth()
     ) {
         if (!message.contextDeckName.isNullOrBlank() && isUser) {
+            val partialLabel = if (message.isPartialContext) " (Partial list sent)" else ""
             Text(
-                text = "Context: ${message.contextDeckName}",
+                text = "Sent to Gemini: ${message.contextDeckName}$partialLabel",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(bottom = 3.dp, end = 4.dp)
@@ -434,6 +499,23 @@ private fun ChatBubble(message: ChatMessageEntity) {
                     fontWeight = FontWeight.Bold,
                     color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                 )
+                if (!isUser && message.isPartialContext) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .semantics(mergeDescendants = true) {}
+                            .testTag("oracle_bubble_partial_notice")
+                    ) {
+                        Text(
+                            text = message.contextScopeNote ?: "Partial deck context only — reply is not validation of the entire deck.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = message.content,

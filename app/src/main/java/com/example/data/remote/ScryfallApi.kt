@@ -1,6 +1,10 @@
 package com.example.data.remote
 
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
+import com.example.domain.CardFaceInfo
+import com.example.domain.CardJsonCodec
+import com.example.domain.CardRulingInfo
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
@@ -9,6 +13,7 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
@@ -23,6 +28,34 @@ interface ScryfallApi {
     suspend fun getCardNamed(
         @Query("fuzzy") fuzzyName: String
     ): ScryfallCardDto
+
+    @GET("cards/named")
+    suspend fun getCardNamedExact(
+        @Query("exact") exactName: String
+    ): ScryfallCardDto
+
+    @GET("cards/{id}")
+    suspend fun getCardByScryfallId(
+        @Path("id") scryfallId: String
+    ): ScryfallCardDto
+
+    @GET("cards/{code}/{number}/{lang}")
+    suspend fun getCardBySetNumberLang(
+        @Path("code") setCode: String,
+        @Path("number") collectorNumber: String,
+        @Path("lang") lang: String
+    ): ScryfallCardDto
+
+    @GET("cards/{code}/{number}")
+    suspend fun getCardBySetNumber(
+        @Path("code") setCode: String,
+        @Path("number") collectorNumber: String
+    ): ScryfallCardDto
+
+    @GET("cards/{id}/rulings")
+    suspend fun getCardRulings(
+        @Path("id") scryfallId: String
+    ): ScryfallRulingsResponse
 
     companion object {
         private const val BASE_URL = "https://api.scryfall.com/"
@@ -62,6 +95,28 @@ data class ScryfallSearchResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class ScryfallRulingsResponse(
+    val data: List<ScryfallRulingDto> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class ScryfallRulingDto(
+    val source: String? = null,
+    @Json(name = "published_at") val publishedAt: String? = null,
+    val comment: String? = null
+) {
+    fun toCardRulingInfo(): CardRulingInfo? {
+        val text = comment?.trim().orEmpty()
+        if (text.isEmpty()) return null
+        return CardRulingInfo(
+            publishedAt = publishedAt.orEmpty(),
+            source = source ?: "wotc",
+            comment = text
+        )
+    }
+}
+
+@JsonClass(generateAdapter = true)
 data class ScryfallImageUrisDto(
     val small: String? = null,
     val normal: String? = null,
@@ -83,7 +138,9 @@ data class ScryfallCardFaceDto(
 @JsonClass(generateAdapter = true)
 data class ScryfallCardDto(
     val id: String,
+    @Json(name = "oracle_id") val oracleId: String? = null,
     val name: String,
+    val lang: String? = null,
     @Json(name = "mana_cost") val manaCost: String? = null,
     val cmc: Double? = null,
     @Json(name = "type_line") val typeLine: String? = null,
@@ -93,6 +150,7 @@ data class ScryfallCardDto(
     val rarity: String? = null,
     val set: String? = null,
     @Json(name = "set_name") val setName: String? = null,
+    @Json(name = "collector_number") val collectorNumber: String? = null,
     val power: String? = null,
     val toughness: String? = null,
     val loyalty: String? = null,
@@ -101,18 +159,39 @@ data class ScryfallCardDto(
     @Json(name = "image_uris") val imageUris: ScryfallImageUrisDto? = null,
     @Json(name = "card_faces") val cardFaces: List<ScryfallCardFaceDto>? = null
 ) {
-    fun toCardEntity(): CardEntity {
+    fun toCardEntity(rulings: List<CardRulingInfo> = emptyList()): CardEntity {
         val frontFace = cardFaces?.firstOrNull()
         val resolvedMana = manaCost ?: frontFace?.manaCost.orEmpty()
         val resolvedType = typeLine ?: frontFace?.typeLine.orEmpty()
         val resolvedOracle = oracleText ?: cardFaces?.mapNotNull { it.oracleText }?.joinToString("\n//\n").orEmpty()
         val resolvedImage = imageUris?.normal ?: imageUris?.artCrop ?: frontFace?.imageUris?.normal
+
+        val faceInfos = cardFaces.orEmpty().map { face ->
+            CardFaceInfo(
+                name = face.name ?: name,
+                manaCost = face.manaCost.orEmpty(),
+                typeLine = face.typeLine.orEmpty(),
+                oracleText = face.oracleText.orEmpty(),
+                power = face.power,
+                toughness = face.toughness,
+                loyalty = face.loyalty,
+                imageUri = face.imageUris?.normal ?: face.imageUris?.artCrop
+            )
+        }
+
+        val trackedFormats = setOf("Commander", "Standard", "Modern", "Pioneer", "Pauper", "Legacy", "Vintage")
         val legalList = legalities
             ?.filterValues { it == "legal" }
             ?.keys
             ?.map { it.replaceFirstChar { c -> c.uppercase() } }
-            ?.filter { it in setOf("Commander", "Standard", "Modern", "Pioneer", "Pauper", "Legacy", "Vintage") }
+            ?.filter { it in trackedFormats }
             .orEmpty()
+
+        val resolvedLegalFormats = when {
+            legalities.isNullOrEmpty() -> "Unknown"
+            legalList.isEmpty() -> "None"
+            else -> legalList.joinToString(",")
+        }
 
         val inferredTags = inferSynergyTags(resolvedType, resolvedOracle, keywords.orEmpty())
 
@@ -133,11 +212,18 @@ data class ScryfallCardDto(
             loyalty = loyalty ?: frontFace?.loyalty,
             keywords = keywords.orEmpty().joinToString(","),
             synergyTags = inferredTags.joinToString(","),
-            legalFormats = if (legalList.isEmpty()) "Commander,Casual" else legalList.joinToString(","),
+            legalFormats = resolvedLegalFormats,
             imageUri = resolvedImage,
             isCustom = false,
             isBookmarked = false,
-            cachedAt = System.currentTimeMillis()
+            cachedAt = System.currentTimeMillis(),
+            oracleId = oracleId.orEmpty(),
+            scryfallId = id,
+            collectorNumber = collectorNumber.orEmpty(),
+            lang = (lang ?: "en").lowercase(),
+            cardFacesJson = CardJsonCodec.encodeFaces(faceInfos),
+            rulingsJson = CardJsonCodec.encodeRulings(rulings),
+            metadataStatus = CardMetadataStatus.VERIFIED
         )
     }
 

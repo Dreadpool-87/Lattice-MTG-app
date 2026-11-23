@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
@@ -28,11 +27,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -45,7 +41,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,16 +52,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.local.CardEntity
 import com.example.ui.components.CardInspectorSheet
-import com.example.ui.components.ManaCostRow
 import com.example.ui.components.ManaSymbolPip
-import com.example.ui.components.RarityPill
 import com.example.ui.components.VaultStatusBadge
 import com.example.ui.viewmodel.VaultViewModel
 
@@ -81,8 +72,10 @@ fun VaultScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val inspectionExtras by viewModel.inspectionExtras.collectAsStateWithLifecycle()
     var inspectedCard by remember { mutableStateOf<CardEntity?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
+    var showCsvImportDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.statusBanner) {
         val msg = uiState.statusBanner
@@ -90,6 +83,10 @@ fun VaultScreen(
             snackbarHostState.showSnackbar(msg)
             viewModel.clearStatusBanner()
         }
+    }
+
+    LaunchedEffect(inspectedCard?.id) {
+        inspectedCard?.let { viewModel.loadCardInspectionExtras(it) }
     }
 
     Box(
@@ -101,7 +98,6 @@ fun VaultScreen(
                 .fillMaxSize()
                 .widthIn(max = 720.dp)
         ) {
-            // Sticky Header + Offline Search + Filter Chips
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 2.dp,
@@ -116,14 +112,14 @@ fun VaultScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Card Vault",
                                 style = MaterialTheme.typography.headlineMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${uiState.cards.size} of ${uiState.totalVaultCount} cards offline",
+                                text = "${uiState.cards.size} of ${uiState.totalVaultCount} cards in local cache",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -157,7 +153,7 @@ fun VaultScreen(
                         OutlinedTextField(
                             value = uiState.query,
                             onValueChange = viewModel::setQuery,
-                            placeholder = { Text("Search name, oracle text, tag...") },
+                            placeholder = { Text("Search name, set, #no, text...") },
                             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search vault") },
                             trailingIcon = {
                                 if (uiState.query.isNotEmpty()) {
@@ -174,9 +170,21 @@ fun VaultScreen(
                         )
 
                         OutlinedButton(
+                            onClick = { showCsvImportDialog = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                            modifier = Modifier
+                                .height(52.dp)
+                                .testTag("open_csv_import_button")
+                        ) {
+                            Icon(Icons.Filled.UploadFile, contentDescription = "Import CSV", modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("CSV", style = MaterialTheme.typography.labelLarge)
+                        }
+
+                        OutlinedButton(
                             onClick = { viewModel.syncFromScryfall() },
                             enabled = !uiState.isSyncing,
-                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
                             modifier = Modifier
                                 .height(52.dp)
                                 .testTag("sync_scryfall_button")
@@ -188,13 +196,19 @@ fun VaultScreen(
                                 )
                             } else {
                                 Icon(Icons.Filled.CloudSync, contentDescription = "Sync Scryfall", modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text("Sync", style = MaterialTheme.typography.labelLarge)
                             }
                         }
                     }
 
-                    // Color + Bookmark Filters
+                    Text(
+                        text = "Search covers local Room cache only (${uiState.totalVaultCount} cached cards) — not the full MTG catalog. Tap Sync to query Scryfall when online.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("vault_local_cache_notice")
+                    )
+
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -247,7 +261,6 @@ fun VaultScreen(
                         )
                     }
 
-                    // Type Filters
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
@@ -285,7 +298,7 @@ fun VaultScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Clear filters, create a custom card, or tap Sync when online to cache Scryfall cards locally.",
+                            text = "Clear filters, import a Delver Lens CSV, create a custom card, or tap Sync when online.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -326,8 +339,8 @@ fun VaultScreen(
     }
 
     inspectedCard?.let { card ->
-        // Observe updated bookmark state from uiState.cards if present
         val liveCard = uiState.cards.firstOrNull { it.id == card.id } ?: card
+        val extrasForCard = if (inspectionExtras.cardId == liveCard.id) inspectionExtras else null
         CardInspectorSheet(
             card = liveCard,
             decks = uiState.decks,
@@ -337,7 +350,10 @@ fun VaultScreen(
             onAddToDeck = { deckId, zone -> viewModel.addCardToDeck(deckId, liveCard.id, zone) },
             onDeleteCustomCard = if (liveCard.isCustom) {
                 { viewModel.deleteCustomCard(liveCard.id) }
-            } else null
+            } else null,
+            printingVariants = extrasForCard?.printingVariants.orEmpty(),
+            rulings = extrasForCard?.rulings.orEmpty(),
+            isLoadingRulings = extrasForCard?.isLoadingRulings == true
         )
     }
 
@@ -350,232 +366,16 @@ fun VaultScreen(
             }
         )
     }
-}
 
-@Composable
-private fun VaultCardRow(
-    card: CardEntity,
-    onClick: () -> Unit,
-    onToggleBookmark: () -> Unit
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .testTag("vault_card_${card.id}")
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = card.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    ManaCostRow(manaCost = card.manaCost, pipSize = 16.dp)
-                }
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = card.typeLine,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RarityPill(rarity = card.rarity)
-                    Text(
-                        text = card.setCode,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (card.power != null && card.toughness != null) {
-                        Text(
-                            text = "• ${card.power}/${card.toughness}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                    }
-                    if (card.isCustom) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = "CUSTOM",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                            )
-                        }
-                    }
-                }
-            }
-            IconButton(
-                onClick = onToggleBookmark,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .testTag("bookmark_card_${card.id}")
-            ) {
-                Icon(
-                    imageVector = if (card.isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                    contentDescription = "Save card",
-                    tint = if (card.isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+    if (showCsvImportDialog) {
+        VaultCsvImportDialog(
+            isImporting = uiState.isImportingCsv,
+            report = uiState.csvImportReport,
+            onImportCsv = { text, deckName, format ->
+                viewModel.importDelverCsv(text, deckName, format)
+            },
+            onClearReport = viewModel::clearCsvImportReport,
+            onDismiss = { showCsvImportDialog = false }
+        )
     }
-}
-
-@Composable
-private fun CreateCustomCardDialog(
-    onDismiss: () -> Unit,
-    onSave: (String, String, Double, String, String, List<String>, String, String?, String?, List<String>) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var manaCost by remember { mutableStateOf("{2}{U}") }
-    var cmcText by remember { mutableStateOf("3") }
-    var typeLine by remember { mutableStateOf("Artifact Creature — Construct") }
-    var oracleText by remember { mutableStateOf("") }
-    var power by remember { mutableStateOf("") }
-    var toughness by remember { mutableStateOf("") }
-    var rarity by remember { mutableStateOf("rare") }
-    var colors by remember { mutableStateOf(setOf("U")) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Offline Card", style = MaterialTheme.typography.headlineSmall) },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState())
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Card Name *") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("custom_card_name_input")
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = manaCost,
-                        onValueChange = { manaCost = it },
-                        label = { Text("Mana Cost") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = cmcText,
-                        onValueChange = { cmcText = it },
-                        label = { Text("CMC") },
-                        singleLine = true,
-                        modifier = Modifier.width(80.dp)
-                    )
-                }
-                OutlinedTextField(
-                    value = typeLine,
-                    onValueChange = { typeLine = it },
-                    label = { Text("Type Line") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = oracleText,
-                    onValueChange = { oracleText = it },
-                    label = { Text("Oracle Text") },
-                    minLines = 3,
-                    maxLines = 5,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = power,
-                        onValueChange = { power = it },
-                        label = { Text("Power") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = toughness,
-                        onValueChange = { toughness = it },
-                        label = { Text("Toughness") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("W", "U", "B", "R", "G").forEach { c ->
-                        val active = c in colors
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier
-                                .clickable { colors = if (active) colors - c else colors + c }
-                                .padding(6.dp)
-                        ) {
-                            ManaSymbolPip(symbol = c, size = 20.dp)
-                        }
-                    }
-                }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    listOf("common", "uncommon", "rare", "mythic").forEach { r ->
-                        FilterChip(
-                            selected = rarity == r,
-                            onClick = { rarity = r },
-                            label = { Text(r.replaceFirstChar { it.uppercase() }) }
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val cmc = cmcText.toDoubleOrNull() ?: 0.0
-                    onSave(
-                        name,
-                        manaCost,
-                        cmc,
-                        typeLine,
-                        oracleText,
-                        colors.toList(),
-                        rarity,
-                        power.ifBlank { null },
-                        toughness.ifBlank { null },
-                        listOf("Custom")
-                    )
-                },
-                enabled = name.isNotBlank(),
-                modifier = Modifier.testTag("confirm_create_custom_card_button")
-            ) {
-                Text("Save Card")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
 }

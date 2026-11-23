@@ -246,6 +246,12 @@ fun AddCardPickerDialog(
                         .fillMaxWidth()
                         .testTag("picker_search_input")
                 )
+                Text(
+                    text = "Searches local Room cache only — not the full MTG catalog.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("picker_local_cache_notice")
+                )
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier

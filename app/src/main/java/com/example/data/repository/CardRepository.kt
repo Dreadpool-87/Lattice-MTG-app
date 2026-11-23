@@ -2,8 +2,13 @@ package com.example.data.repository
 
 import com.example.data.local.CardDao
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.StarterCards
 import com.example.data.remote.ScryfallApi
+import com.example.domain.CardJsonCodec
+import com.example.domain.CardRulingInfo
+import com.example.domain.DelverCsvImporter
+import com.example.domain.DelverImportReport
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
@@ -56,12 +61,13 @@ class CardRepository(
             toughness = toughness?.trim()?.takeIf { it.isNotEmpty() },
             keywords = "",
             synergyTags = synergyTags.joinToString(","),
-            legalFormats = "Commander,Casual",
+            legalFormats = "Custom (Unchecked)",
             isCustom = true,
             isBookmarked = true,
-            cachedAt = System.currentTimeMillis()
+            cachedAt = System.currentTimeMillis(),
+            metadataStatus = CardMetadataStatus.CUSTOM
         )
-        cardDao.upsertCard(card)
+        cardDao.upsertPreservingState(card)
         return card
     }
 
@@ -70,16 +76,48 @@ class CardRepository(
     }
 
     suspend fun restoreStarterCatalog() {
-        cardDao.insertAll(StarterCards.cards)
+        cardDao.upsertAllPreservingState(StarterCards.cards)
     }
 
     suspend fun clearUnusedRemoteCache(): Int {
         return cardDao.clearUnusedRemoteCache()
     }
 
+    suspend fun importDelverCsv(csvContent: String, offlineOnlyMode: Boolean): DelverImportReport {
+        val parsedRows = DelverCsvImporter.parseCsv(csvContent)
+        val canFetchOnline = !offlineOnlyMode && networkMonitor.isCurrentlyOnline()
+        return DelverCsvImporter.matchAndImportRows(
+            rows = parsedRows,
+            cardDao = cardDao,
+            scryfallApi = scryfallApi,
+            canFetchOnline = canFetchOnline
+        )
+    }
+
+    suspend fun getPrintingVariants(card: CardEntity): List<CardEntity> {
+        val byOracle = card.oracleId.takeIf { it.isNotBlank() }?.let { cardDao.findByOracleId(it) }.orEmpty()
+        val byName = cardDao.findAllByExactNameIgnoreCase(card.name)
+        return (byOracle + byName).distinctBy { it.id }
+    }
+
+    suspend fun fetchAndCacheRulings(card: CardEntity, offlineOnlyMode: Boolean): List<CardRulingInfo> {
+        val cached = CardJsonCodec.decodeRulings(card.rulingsJson)
+        if (cached.isNotEmpty()) return cached
+        val targetScryfallId = card.scryfallId.takeIf { it.isNotBlank() } ?: return emptyList()
+        if (offlineOnlyMode || !networkMonitor.isCurrentlyOnline()) return emptyList()
+        return runCatching {
+            val response = scryfallApi.getCardRulings(targetScryfallId)
+            val rulings = response.data.mapNotNull { it.toCardRulingInfo() }
+            if (rulings.isNotEmpty()) {
+                cardDao.updateRulings(card.id, CardJsonCodec.encodeRulings(rulings))
+            }
+            rulings
+        }.getOrDefault(emptyList())
+    }
+
     suspend fun syncFromScryfall(query: String, offlineOnlyMode: Boolean): SyncResult {
         if (offlineOnlyMode) {
-            return SyncResult.OfflineOrError("Offline-only mode is enabled. Disable it in Tabletop settings to sync Scryfall.")
+            return SyncResult.OfflineOrError("Offline-only mode is enabled. Disable it in Settings to sync Scryfall.")
         }
         if (!networkMonitor.isCurrentlyOnline()) {
             return SyncResult.OfflineOrError("Device is offline. Searching local Room vault instead.")
@@ -91,7 +129,7 @@ class CardRepository(
             if (entities.isEmpty()) {
                 SyncResult.OfflineOrError("No Scryfall cards matched \"$cleanQuery\".")
             } else {
-                cardDao.insertAll(entities)
+                cardDao.upsertAllPreservingState(entities)
                 SyncResult.Success(entities.size, cleanQuery)
             }
         } catch (e: Exception) {
@@ -100,36 +138,50 @@ class CardRepository(
     }
 
     suspend fun resolveOrCreateCardByName(name: String, offlineOnlyMode: Boolean): CardEntity {
-        val existing = cardDao.findByExactNameIgnoreCase(name.trim())
-        if (existing != null) return existing
+        val trimmed = name.trim()
+        val existing = cardDao.findByExactNameIgnoreCase(trimmed)
+        if (existing != null && !existing.id.startsWith("offline-")) {
+            return existing
+        }
 
         if (!offlineOnlyMode && networkMonitor.isCurrentlyOnline()) {
-            val fetched = runCatching { scryfallApi.getCardNamed(name.trim()).toCardEntity() }.getOrNull()
+            val fetched = runCatching { scryfallApi.getCardNamedExact(trimmed).toCardEntity() }.getOrNull()
             if (fetched != null) {
-                cardDao.upsertCard(fetched)
-                return fetched
+                return if (existing != null) {
+                    cardDao.upsertPreservingState(
+                        fetched.copy(
+                            id = existing.id,
+                            isBookmarked = existing.isBookmarked,
+                            isCustom = false
+                        )
+                    )
+                } else {
+                    cardDao.upsertPreservingState(fetched)
+                }
             }
         }
 
-        // Offline fallback stub so imported decklists never lose cards even without internet!
+        if (existing != null) return existing
+
+        // Unresolved offline placeholder: keep legality & metadata explicitly Unknown.
         val offlineCard = CardEntity(
-            id = "offline-${name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-")}",
-            name = name.trim(),
+            id = "offline-${trimmed.lowercase().replace(Regex("[^a-z0-9]+"), "-")}",
+            name = trimmed,
             manaCost = "",
             cmc = 0.0,
-            typeLine = "Imported Card (Offline Entry)",
-            oracleText = "Imported offline. Tap Sync Scryfall when online to populate full oracle rules and art.",
+            typeLine = "Unresolved Card (Offline Entry)",
+            oracleText = "Unresolved offline entry. Sync with Scryfall when online to resolve oracle text, printing details, and legality.",
             colors = "",
             colorIdentity = "",
-            rarity = "common",
+            rarity = "unknown",
             setCode = "LOCAL",
-            setName = "Offline Import",
-            synergyTags = "Imported",
-            legalFormats = "Commander,Casual",
-            isCustom = true,
-            isBookmarked = false
+            setName = "Unresolved Offline Import",
+            synergyTags = "Unresolved",
+            legalFormats = "Unknown",
+            isCustom = false,
+            isBookmarked = false,
+            metadataStatus = CardMetadataStatus.UNRESOLVED
         )
-        cardDao.upsertCard(offlineCard)
-        return offlineCard
+        return cardDao.upsertPreservingState(offlineCard)
     }
 }

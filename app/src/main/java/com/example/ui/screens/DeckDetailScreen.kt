@@ -332,7 +332,15 @@ fun DeckDetailScreen(
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.padding(16.dp)
                                 ) {
-                                    Text("Format Legality & Curve Check", style = MaterialTheme.typography.titleMedium)
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("Checks Performed (Partial Local Check)", style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            text = "Offline checks on cached Room data only — not full tournament format validation.",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.testTag("deck_validation_scope_subtitle")
+                                        )
+                                    }
                                     analytics.validationNotes.forEach { note ->
                                         Row(verticalAlignment = Alignment.Top) {
                                             Icon(

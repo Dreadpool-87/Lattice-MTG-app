@@ -11,6 +11,8 @@ import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
 import com.example.data.repository.SyncResult
+import com.example.domain.CardRulingInfo
+import com.example.domain.DelverImportReport
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +21,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+data class CardInspectionExtras(
+    val cardId: String = "",
+    val printingVariants: List<CardEntity> = emptyList(),
+    val rulings: List<CardRulingInfo> = emptyList(),
+    val isLoadingRulings: Boolean = false
+)
 
 data class VaultUiState(
     val cards: List<CardEntity> = emptyList(),
@@ -31,6 +40,8 @@ data class VaultUiState(
     val maxCmcFilter: Int? = null,
     val decks: List<DeckWithEntries> = emptyList(),
     val isSyncing: Boolean = false,
+    val isImportingCsv: Boolean = false,
+    val csvImportReport: DelverImportReport? = null,
     val isOnline: Boolean = false,
     val offlineOnlyMode: Boolean = false,
     val showCardArt: Boolean = true,
@@ -52,7 +63,12 @@ class VaultViewModel(
     private val bookmarkedOnly = MutableStateFlow(false)
     private val maxCmcFilter = MutableStateFlow<Int?>(null)
     private val isSyncing = MutableStateFlow(false)
+    private val isImportingCsv = MutableStateFlow(false)
+    private val csvImportReport = MutableStateFlow<DelverImportReport?>(null)
     private val statusBanner = MutableStateFlow<String?>(null)
+
+    private val _inspectionExtras = MutableStateFlow(CardInspectionExtras())
+    val inspectionExtras: StateFlow<CardInspectionExtras> = _inspectionExtras
 
     private val searchedCardsFlow = query.flatMapLatest { q ->
         cardRepository.searchLocalCards(q)
@@ -69,6 +85,8 @@ class VaultViewModel(
         maxCmcFilter,
         deckRepository.allDecks,
         isSyncing,
+        isImportingCsv,
+        csvImportReport,
         networkMonitor.isOnline,
         preferencesRepository.offlineOnlyMode,
         preferencesRepository.showCardArt,
@@ -86,10 +104,12 @@ class VaultViewModel(
         @Suppress("UNCHECKED_CAST")
         val decks = values[8] as List<DeckWithEntries>
         val syncing = values[9] as Boolean
-        val online = values[10] as Boolean
-        val offlineForced = values[11] as Boolean
-        val cardArt = values[12] as Boolean
-        val banner = values[13] as String?
+        val importingCsv = values[10] as Boolean
+        val csvReport = values[11] as DelverImportReport?
+        val online = values[12] as Boolean
+        val offlineForced = values[13] as Boolean
+        val cardArt = values[14] as Boolean
+        val banner = values[15] as String?
 
         val filtered = rawCards.filter { card ->
             val cardColors = card.colorIdentity
@@ -126,6 +146,8 @@ class VaultViewModel(
             maxCmcFilter = maxCmc,
             decks = decks,
             isSyncing = syncing,
+            isImportingCsv = importingCsv,
+            csvImportReport = csvReport,
             isOnline = online,
             offlineOnlyMode = offlineForced,
             showCardArt = cardArt,
@@ -178,6 +200,28 @@ class VaultViewModel(
         statusBanner.value = null
     }
 
+    fun loadCardInspectionExtras(card: CardEntity) {
+        viewModelScope.launch {
+            val variants = cardRepository.getPrintingVariants(card)
+            _inspectionExtras.value = CardInspectionExtras(
+                cardId = card.id,
+                printingVariants = variants,
+                rulings = com.example.domain.CardJsonCodec.decodeRulings(card.rulingsJson),
+                isLoadingRulings = card.rulingsJson.isBlank() &&
+                    card.scryfallId.isNotBlank() &&
+                    !uiState.value.offlineOnlyMode &&
+                    uiState.value.isOnline
+            )
+            if (card.rulingsJson.isBlank() && card.scryfallId.isNotBlank()) {
+                val fetched = cardRepository.fetchAndCacheRulings(card, uiState.value.offlineOnlyMode)
+                _inspectionExtras.value = _inspectionExtras.value.copy(
+                    rulings = fetched,
+                    isLoadingRulings = false
+                )
+            }
+        }
+    }
+
     fun toggleBookmark(card: CardEntity) {
         viewModelScope.launch {
             cardRepository.toggleBookmark(card.id, card.isBookmarked)
@@ -226,6 +270,43 @@ class VaultViewModel(
             cardRepository.deleteCustomCard(cardId)
             statusBanner.value = "Deleted custom card."
         }
+    }
+
+    fun importDelverCsv(
+        csvContent: String,
+        createDeckName: String? = null,
+        deckFormat: String = "Commander"
+    ) {
+        if (csvContent.isBlank()) return
+        viewModelScope.launch {
+            isImportingCsv.value = true
+            val baseReport = cardRepository.importDelverCsv(
+                csvContent = csvContent,
+                offlineOnlyMode = uiState.value.offlineOnlyMode
+            )
+            val createdDeckId = if (!createDeckName.isNullOrBlank() && baseReport.verifiedRows.isNotEmpty()) {
+                deckRepository.addVerifiedCsvToNewDeck(createDeckName, deckFormat, baseReport)
+            } else {
+                null
+            }
+            val finalReport = baseReport.copy(deckIdCreated = createdDeckId)
+            csvImportReport.value = finalReport
+            statusBanner.value = buildString {
+                append("CSV review: ${finalReport.totalVerifiedCopies} verified copies")
+                if (finalReport.conflictRows.isNotEmpty()) {
+                    append(", ${finalReport.conflictRows.size} mismatches")
+                }
+                if (finalReport.unresolvedRows.isNotEmpty()) {
+                    append(", ${finalReport.unresolvedRows.size} unresolved")
+                }
+                append(".")
+            }
+            isImportingCsv.value = false
+        }
+    }
+
+    fun clearCsvImportReport() {
+        csvImportReport.value = null
     }
 
     fun syncFromScryfall() {

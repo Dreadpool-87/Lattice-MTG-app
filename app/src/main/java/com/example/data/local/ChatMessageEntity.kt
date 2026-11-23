@@ -14,7 +14,9 @@ data class ChatMessageEntity(
     val role: String, // "user" or "model"
     val content: String,
     val contextDeckName: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val isPartialContext: Boolean = false,
+    val contextScopeNote: String? = null
 )
 
 @Dao

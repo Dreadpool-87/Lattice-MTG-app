@@ -4,13 +4,22 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+object CardMetadataStatus {
+    const val VERIFIED = "VERIFIED"
+    const val UNRESOLVED = "UNRESOLVED"
+    const val CUSTOM = "CUSTOM"
+}
+
 @Entity(
     tableName = "cards",
     indices = [
         Index(value = ["name"]),
         Index(value = ["typeLine"]),
         Index(value = ["colorIdentity"]),
-        Index(value = ["cmc"])
+        Index(value = ["cmc"]),
+        Index(value = ["oracleId"]),
+        Index(value = ["scryfallId"]),
+        Index(value = ["setCode", "collectorNumber", "lang"])
     ]
 )
 data class CardEntity(
@@ -34,5 +43,12 @@ data class CardEntity(
     val imageUri: String? = null,
     val isCustom: Boolean = false,
     val isBookmarked: Boolean = false,
-    val cachedAt: Long = System.currentTimeMillis()
+    val cachedAt: Long = System.currentTimeMillis(),
+    val oracleId: String = "",
+    val scryfallId: String = "",
+    val collectorNumber: String = "",
+    val lang: String = "en",
+    val cardFacesJson: String = "",
+    val rulingsJson: String = "",
+    val metadataStatus: String = CardMetadataStatus.VERIFIED
 )

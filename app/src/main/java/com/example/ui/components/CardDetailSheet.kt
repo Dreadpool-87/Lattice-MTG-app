@@ -20,10 +20,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -55,8 +57,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
+import com.example.domain.CardJsonCodec
+import com.example.domain.CardRulingInfo
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -67,12 +72,25 @@ fun CardInspectorSheet(
     onDismiss: () -> Unit,
     onToggleBookmark: () -> Unit,
     onAddToDeck: (deckId: Long, zone: String) -> Unit,
-    onDeleteCustomCard: (() -> Unit)? = null
+    onDeleteCustomCard: (() -> Unit)? = null,
+    printingVariants: List<CardEntity> = emptyList(),
+    rulings: List<CardRulingInfo> = emptyList(),
+    isLoadingRulings: Boolean = false
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedDeckId by remember(decks) { mutableStateOf(decks.firstOrNull()?.deck?.id) }
     var selectedZone by remember { mutableStateOf(DeckZones.MAINBOARD) }
     var deckMenuExpanded by remember { mutableStateOf(false) }
+
+    val decodedFaces = remember(card.cardFacesJson) {
+        CardJsonCodec.decodeFaces(card.cardFacesJson)
+    }
+    val effectiveRulings = remember(rulings, card.rulingsJson) {
+        if (rulings.isNotEmpty()) rulings else CardJsonCodec.decodeRulings(card.rulingsJson)
+    }
+    val isUnresolved = card.metadataStatus == CardMetadataStatus.UNRESOLVED ||
+        card.legalFormats.equals("Unknown", ignoreCase = true) ||
+        card.legalFormats.isBlank()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -119,12 +137,23 @@ fun CardInspectorSheet(
                             tint = if (card.isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("sheet_close_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Close card details",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Card Visual Frame (Scryfall image when online/cached + tactile offline card frame)
             val identityList = card.colorIdentity.split(",").map { it.trim() }.filter { it.isNotEmpty() }
             val accentColor = manaColorsForSymbol(identityList.firstOrNull() ?: "C").first
 
@@ -163,11 +192,17 @@ fun CardInspectorSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                             RarityPill(rarity = card.rarity)
                             Spacer(modifier = Modifier.width(8.dp))
+                            val printingMeta = buildString {
+                                append(card.setCode)
+                                if (card.collectorNumber.isNotBlank()) append(" #${card.collectorNumber}")
+                                if (card.lang.isNotBlank()) append(" (${card.lang.uppercase()})")
+                                if (card.setName.isNotBlank()) append(" • ${card.setName}")
+                            }
                             Text(
-                                text = "${card.setCode} • ${card.setName}",
+                                text = printingMeta,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -204,11 +239,79 @@ fun CardInspectorSheet(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    Text(
-                        text = card.oracleText.ifBlank { "No rules text." },
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    if (decodedFaces.isNotEmpty()) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("card_faces_section")
+                        ) {
+                            Text(
+                                text = "Card Faces (${decodedFaces.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            decodedFaces.forEachIndexed { index, face ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "Face ${index + 1}: ${face.name}",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            ManaCostRow(manaCost = face.manaCost, pipSize = 16.dp)
+                                        }
+                                        if (face.typeLine.isNotBlank()) {
+                                            Text(
+                                                text = face.typeLine,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = face.oracleText.ifBlank { "No rules text." },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (face.power != null && face.toughness != null) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "${face.power}/${face.toughness}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                        } else if (face.loyalty != null) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Loyalty ${face.loyalty}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = card.oracleText.ifBlank { "No rules text." },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
 
                     val tags = card.synergyTags.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                     if (tags.isNotEmpty()) {
@@ -235,10 +338,142 @@ fun CardInspectorSheet(
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Legal: ${card.legalFormats.replace(",", " • ")}",
+                        text = if (isUnresolved) {
+                            "Format Legality: Unknown (Unresolved metadata)"
+                        } else {
+                            "Format Legality (Cached): ${card.legalFormats.replace(",", " • ")}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isUnresolved) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("card_legality_status")
+                    )
+
+                    if (card.scryfallId.isNotBlank() || card.oracleId.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.testTag("card_identifiers_section")
+                        ) {
+                            if (card.scryfallId.isNotBlank()) {
+                                Text(
+                                    text = "Scryfall Printing ID: ${card.scryfallId}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (card.oracleId.isNotBlank()) {
+                                Text(
+                                    text = "Oracle Identity ID: ${card.oracleId}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (printingVariants.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("card_printing_variants_section")
+                ) {
+                    Text(
+                        text = "Cached Printing Variants (${printingVariants.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        printingVariants.forEach { variant ->
+                            val isCurrent = variant.id == card.id
+                            val label = buildString {
+                                append(variant.setCode)
+                                if (variant.collectorNumber.isNotBlank()) append(" #${variant.collectorNumber}")
+                                append(" (${variant.lang.uppercase()})")
+                                if (isCurrent) append(" • Current")
+                            }
+                            Surface(
+                                color = if (isCurrent) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isCurrent) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("card_rulings_section")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Official Rulings (${effectiveRulings.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isLoadingRulings) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                    }
+                }
+                if (effectiveRulings.isEmpty()) {
+                    Text(
+                        text = if (isLoadingRulings) {
+                            "Checking Scryfall rulings..."
+                        } else {
+                            "No cached rulings available offline."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                } else {
+                    effectiveRulings.forEach { ruling ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "${ruling.publishedAt} • ${ruling.source.uppercase()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = ruling.comment,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

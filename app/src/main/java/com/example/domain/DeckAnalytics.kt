@@ -167,6 +167,38 @@ object DeckAnalytics {
         )
     }
 
+    private fun canonicalCardIdentityKey(
+        card: CardEntity,
+        oracleByNormalizedName: Map<String, String>
+    ): String {
+        val directOracle = card.oracleId.trim().lowercase()
+        if (directOracle.isNotEmpty()) return "oracle:$directOracle"
+        val normalizedName = card.name.trim().lowercase()
+        val linkedOracle = oracleByNormalizedName[normalizedName]
+        if (!linkedOracle.isNullOrEmpty()) return "oracle:$linkedOracle"
+        return "name:$normalizedName"
+    }
+
+    private fun isUnlimitedCopyCard(card: CardEntity): Boolean {
+        val trimmedName = card.name.trim()
+        if (trimmedName in basicLandNames || trimmedName.startsWith("Snow-Covered ") && trimmedName.removePrefix("Snow-Covered ") in basicLandNames) {
+            return true
+        }
+        val typeLower = card.typeLine.lowercase()
+        if ("basic" in typeLower && "land" in typeLower) {
+            return true
+        }
+        val oracleLower = card.oracleText.lowercase()
+        return "a deck can have any number of cards named" in oracleLower
+    }
+
+    private fun isUnresolvedCard(card: CardEntity): Boolean {
+        return card.metadataStatus == com.example.data.local.CardMetadataStatus.UNRESOLVED ||
+            card.id.startsWith("offline-") ||
+            card.legalFormats.equals("Unknown", ignoreCase = true) ||
+            card.legalFormats.isBlank()
+    }
+
     private fun validateDeck(
         deckWithEntries: DeckWithEntries,
         playable: List<DeckEntryWithCard>,
@@ -174,11 +206,22 @@ object DeckAnalytics {
         landCount: Int
     ): List<ValidationNote> {
         val notes = mutableListOf<ValidationNote>()
-        val format = deckWithEntries.deck.format
+        val format = deckWithEntries.deck.format.trim()
+        val isCommander = format.equals("Commander", ignoreCase = true)
+        val isCasual = format.equals("Casual", ignoreCase = true)
 
-        if (format.equals("Commander", ignoreCase = true)) {
+        val allEntries = deckWithEntries.entries
+        val oracleByNormalizedName = allEntries
+            .mapNotNull { item ->
+                val oracle = item.card.oracleId.trim().lowercase()
+                if (oracle.isNotEmpty()) item.card.name.trim().lowercase() to oracle else null
+            }
+            .toMap()
+
+        // 1. Deck / Zone Size Check
+        if (isCommander) {
             if (playableCount == 100) {
-                notes.add(ValidationNote("Deck Size Valid", "Exact 100 cards including Commander.", false))
+                notes.add(ValidationNote("Commander Zone Size (100/100)", "Exact 100 cards including Commander.", false))
             } else {
                 notes.add(
                     ValidationNote(
@@ -191,44 +234,135 @@ object DeckAnalytics {
             if (deckWithEntries.commanderEntries.isEmpty()) {
                 notes.add(ValidationNote("Missing Commander", "Assign a Legendary Creature in the Commander zone.", true))
             }
-            val duplicates = playable.filter {
-                it.entry.quantity > 1 && it.card.name !in basicLandNames
-            }
-            if (duplicates.isNotEmpty()) {
-                notes.add(
-                    ValidationNote(
-                        "Singleton Violation",
-                        "Multiple copies of: ${duplicates.joinToString { it.card.name }}",
-                        true
-                    )
-                )
-            } else {
-                notes.add(ValidationNote("Singleton Check Passed", "No non-basic duplicates found.", false))
-            }
         } else {
             if (playableCount >= 60) {
-                notes.add(ValidationNote("Mainboard Size Valid", "$playableCount cards (60+ minimum).", false))
+                notes.add(ValidationNote("Mainboard Size Check ($playableCount/60+)", "$playableCount cards (meets 60-card minimum).", false))
             } else {
                 notes.add(
                     ValidationNote(
                         "Under 60 Cards ($playableCount/60)",
-                        "Constructed formats require at least 60 mainboard cards.",
-                        true
-                    )
-                )
-            }
-            val overFour = playable.filter { it.entry.quantity > 4 && it.card.name !in basicLandNames }
-            if (overFour.isNotEmpty()) {
-                notes.add(
-                    ValidationNote(
-                        "4-Copy Limit Exceeded",
-                        overFour.joinToString { "${it.card.name} (${it.entry.quantity}x)" },
+                        "Constructed formats typically require at least 60 mainboard cards.",
                         true
                     )
                 )
             }
         }
 
+        // 2. Copy Limit Check Across Printings (grouped by Oracle ID / canonical card identity)
+        val copyLimitEntries = if (isCommander) {
+            playable
+        } else {
+            allEntries.filter {
+                it.entry.zone == DeckZones.MAINBOARD ||
+                    it.entry.zone == DeckZones.SIDEBOARD ||
+                    it.entry.zone == DeckZones.COMMANDER
+            }
+        }
+
+        val groupedByIdentity = linkedMapOf<String, MutableList<DeckEntryWithCard>>()
+        copyLimitEntries.forEach { item ->
+            val key = canonicalCardIdentityKey(item.card, oracleByNormalizedName)
+            groupedByIdentity.getOrPut(key) { mutableListOf() }.add(item)
+        }
+
+        if (isCommander) {
+            val violations = groupedByIdentity.values.mapNotNull { group ->
+                val sample = group.first().card
+                if (isUnlimitedCopyCard(sample)) return@mapNotNull null
+                val totalCopies = group.sumOf { it.entry.quantity }
+                if (totalCopies > 1) {
+                    val printingCount = group.map { it.card.id }.distinct().size
+                    val suffix = if (printingCount > 1) " across $printingCount printings" else ""
+                    "${sample.name} (${totalCopies}x$suffix)"
+                } else null
+            }
+            if (violations.isNotEmpty()) {
+                notes.add(
+                    ValidationNote(
+                        "Singleton Limit Exceeded",
+                        violations.joinToString("; "),
+                        true
+                    )
+                )
+            } else {
+                notes.add(
+                    ValidationNote(
+                        "Singleton Check Passed (Cross-Printing)",
+                        "No non-basic card exceeds 1 copy across printings.",
+                        false
+                    )
+                )
+            }
+        } else {
+            val overFour = groupedByIdentity.values.mapNotNull { group ->
+                val sample = group.first().card
+                if (isUnlimitedCopyCard(sample)) return@mapNotNull null
+                val totalCopies = group.sumOf { it.entry.quantity }
+                if (totalCopies > 4) {
+                    val printingCount = group.map { it.card.id }.distinct().size
+                    val suffix = if (printingCount > 1) " across $printingCount printings" else ""
+                    "${sample.name} (${totalCopies}x$suffix)"
+                } else null
+            }
+            if (overFour.isNotEmpty()) {
+                notes.add(
+                    ValidationNote(
+                        "4-Copy Limit Exceeded",
+                        overFour.joinToString("; "),
+                        true
+                    )
+                )
+            } else if (copyLimitEntries.isNotEmpty()) {
+                notes.add(
+                    ValidationNote(
+                        "4-Copy Limit Check Passed (Cross-Printing)",
+                        "No non-basic card exceeds 4 total copies across Mainboard & Sideboard printings.",
+                        false
+                    )
+                )
+            }
+        }
+
+        // 3. Unresolved Cards Check (legality strictly treated as Unknown)
+        val activeDeckCards = allEntries
+            .filter { it.entry.zone != DeckZones.MAYBEBOARD }
+            .map { it.card }
+            .distinctBy { it.id }
+
+        val unresolvedCards = activeDeckCards.filter { isUnresolvedCard(it) }
+        if (unresolvedCards.isNotEmpty()) {
+            notes.add(
+                ValidationNote(
+                    "Unresolved Cards — Legality Unknown (${unresolvedCards.size})",
+                    "Format legality is Unknown for: ${unresolvedCards.joinToString { it.name }}. Sync online to resolve metadata.",
+                    true
+                )
+            )
+        }
+
+        // 4. Cached Format Legality Snapshot Check (resolved non-custom cards only)
+        val checkedSnapshot = !isCasual && format.isNotBlank()
+        if (checkedSnapshot) {
+            val notLegalCached = activeDeckCards.filter { card ->
+                !isUnresolvedCard(card) &&
+                    !card.isCustom &&
+                    card.legalFormats
+                        .split(",")
+                        .map { it.trim() }
+                        .none { it.equals(format, ignoreCase = true) }
+            }
+            if (notLegalCached.isNotEmpty()) {
+                notes.add(
+                    ValidationNote(
+                        "Not Listed Legal in $format (Cached Snapshot)",
+                        notLegalCached.joinToString { it.name },
+                        true
+                    )
+                )
+            }
+        }
+
+        // 5. Land Ratio Estimate
         if (playableCount > 0) {
             val ratio = (landCount.toDouble() / playableCount) * 100
             if (ratio < 28.0) {
@@ -242,13 +376,29 @@ object DeckAnalytics {
             } else {
                 notes.add(
                     ValidationNote(
-                        "Healthy Land Ratio",
+                        "Land Ratio Estimate ($landCount lands)",
                         "$landCount lands (${ratio.toInt()}% of playable deck).",
                         false
                     )
                 )
             }
         }
+
+        // 6. Explicit Scope Disclosure — Report only checks actually performed
+        val performed = buildList {
+            add(if (isCommander) "Commander 100-card count" else "60-card mainboard count")
+            add(if (isCommander) "cross-printing singleton limit" else "cross-printing 4-copy limit")
+            add("unresolved card legality check")
+            if (checkedSnapshot) add("cached $format legality snapshot")
+            if (playableCount > 0) add("land ratio heuristic")
+        }
+        notes.add(
+            ValidationNote(
+                "Checks Performed (Partial Local Check)",
+                "Executed locally: ${performed.joinToString(", ")}. Not verified: live Scryfall banlist updates, Commander color-identity rules, or full tournament validation.",
+                false
+            )
+        )
 
         return notes
     }

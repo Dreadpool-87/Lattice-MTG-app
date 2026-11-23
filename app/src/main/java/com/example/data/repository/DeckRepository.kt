@@ -228,4 +228,23 @@ class DeckRepository(
             uniqueEntries = uniqueCount
         )
     }
+
+    suspend fun addVerifiedCsvToNewDeck(
+        name: String,
+        format: String,
+        report: com.example.domain.DelverImportReport
+    ): Long? {
+        if (report.verifiedRows.isEmpty()) return null
+        val deckId = createDeck(
+            name = name.ifBlank { "Delver CSV Import" },
+            format = format,
+            description = "Imported ${report.totalVerifiedCopies} verified copies from Delver Lens CSV",
+            colorIdentity = emptyList()
+        )
+        report.verifiedRows.forEach { res ->
+            val card = res.resolvedCard ?: return@forEach
+            addCardToDeck(deckId, card.id, DeckZones.MAINBOARD, res.row.quantity)
+        }
+        return deckId
+    }
 }
