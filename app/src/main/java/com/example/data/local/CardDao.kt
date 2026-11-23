@@ -69,7 +69,7 @@ interface CardDao {
     @Query("SELECT * FROM cards WHERE LOWER(name) = LOWER(:name) LIMIT 1")
     suspend fun findByExactNameIgnoreCase(name: String): CardEntity?
 
-    @Query("SELECT * FROM cards WHERE id LIKE 'offline-%' AND LOWER(name) = LOWER(:name) LIMIT 1")
+    @Query("SELECT * FROM cards WHERE id LIKE 'offline-%' AND metadataStatus = 'UNRESOLVED' AND scryfallId = '' AND LOWER(name) = LOWER(:name) LIMIT 1")
     suspend fun findOfflinePlaceholderByName(name: String): CardEntity?
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -82,13 +82,15 @@ interface CardDao {
     suspend fun upsertPreservingState(card: CardEntity): CardEntity {
         val existing = getCardById(card.id)
             ?: card.scryfallId.takeIf { it.isNotBlank() }?.let { findByScryfallId(it) }
-            ?: findOfflinePlaceholderByName(card.name)
+            ?: if (card.metadataStatus == CardMetadataStatus.VERIFIED && card.scryfallId.isNotBlank()) {
+                findOfflinePlaceholderByName(card.name)
+            } else null
 
         return if (existing == null) {
             insertIgnore(card)
             card
         } else {
-            val isOfflineUpgrade = existing.id.startsWith("offline-")
+            val isOfflineUpgrade = existing.metadataStatus == CardMetadataStatus.UNRESOLVED
             val merged = card.copy(
                 id = existing.id,
                 isBookmarked = existing.isBookmarked,
@@ -119,14 +121,4 @@ interface CardDao {
 
     @Query("DELETE FROM cards WHERE id = :cardId AND isCustom = 1")
     suspend fun deleteCustomCard(cardId: String)
-
-    @Query(
-        """
-        DELETE FROM cards
-        WHERE isCustom = 0
-          AND id NOT LIKE 'local-%'
-          AND id NOT IN (SELECT DISTINCT cardId FROM deck_entries)
-        """
-    )
-    suspend fun clearUnusedRemoteCache(): Int
 }

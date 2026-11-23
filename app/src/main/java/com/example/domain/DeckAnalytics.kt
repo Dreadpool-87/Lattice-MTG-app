@@ -194,7 +194,6 @@ object DeckAnalytics {
 
     private fun isUnresolvedCard(card: CardEntity): Boolean {
         return card.metadataStatus == com.example.data.local.CardMetadataStatus.UNRESOLVED ||
-            card.id.startsWith("offline-") ||
             card.legalFormats.equals("Unknown", ignoreCase = true) ||
             card.legalFormats.isBlank()
     }

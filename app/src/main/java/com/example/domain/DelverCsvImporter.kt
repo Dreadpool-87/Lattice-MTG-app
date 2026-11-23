@@ -142,7 +142,7 @@ object DelverCsvImporter {
             val rowNum = if (hasHeaderRow) idx + 2 else idx + 1
 
             val rawQty = colQty.takeIf { it in cols.indices }?.let { cols[it].trim() }
-            val qty = rawQty?.toIntOrNull()?.coerceAtLeast(0) ?: 1
+            val qty = if (colQty < 0) 1 else rawQty?.toIntOrNull() ?: 0
 
             val rawNameField = if (hasHeaderRow) {
                 colName.takeIf { it in cols.indices }?.let { cols[it].trim() }
@@ -188,11 +188,12 @@ object DelverCsvImporter {
         scryfallApi: ScryfallApi?,
         canFetchOnline: Boolean
     ): DelverImportReport {
-        val resolutions = mutableListOf<DelverRowResolution>()
+        val checkedRows = mutableListOf<DelverRowResolution>()
+        val candidates = mutableMapOf<DelverCsvRow, CardEntity>()
 
         for (row in rows) {
             if (row.quantity <= 0) {
-                resolutions.add(
+                checkedRows.add(
                     DelverRowResolution(
                         row = row,
                         status = CsvRowMatchStatus.UNRESOLVED,
@@ -202,22 +203,24 @@ object DelverCsvImporter {
                 continue
             }
 
-            val candidate = findExactCandidate(
+            val lookup = row.copy(rowNumber = 0, rawLine = "", quantity = 0)
+            val candidate = candidates[lookup] ?: findExactCandidate(
                 row = row,
                 cardDao = cardDao,
                 scryfallApi = scryfallApi,
                 canFetchOnline = canFetchOnline
-            )
+            )?.also { candidates[lookup] = it }
 
             if (candidate == null) {
                 val hint = when {
                     row.scryfallId != null -> "Scryfall ID ${row.scryfallId}"
                     row.setCode != null && row.collectorNumber != null ->
                         "${row.name ?: "Card"} (${row.setCode}) #${row.collectorNumber}"
+                    row.name != null && row.setCode != null -> "${row.name} (${row.setCode})"
                     else -> row.name ?: "Row ${row.rowNumber}"
                 }
                 val offlineNote = if (!canFetchOnline) " while offline/local-only" else ""
-                resolutions.add(
+                checkedRows.add(
                     DelverRowResolution(
                         row = row,
                         status = CsvRowMatchStatus.UNRESOLVED,
@@ -229,7 +232,7 @@ object DelverCsvImporter {
 
             val mismatches = verifySuppliedFields(row, candidate)
             if (mismatches.isNotEmpty()) {
-                resolutions.add(
+                checkedRows.add(
                     DelverRowResolution(
                         row = row,
                         status = CsvRowMatchStatus.CONFLICT,
@@ -239,16 +242,26 @@ object DelverCsvImporter {
                     )
                 )
             } else {
-                val persisted = cardDao.upsertPreservingState(candidate)
-                resolutions.add(
+                checkedRows.add(
                     DelverRowResolution(
                         row = row,
                         status = CsvRowMatchStatus.VERIFIED,
-                        resolvedCard = persisted,
-                        statusDetail = "${persisted.name} (${persisted.setCode}) #${persisted.collectorNumber.ifBlank { "—" }} [${persisted.lang}] × ${row.quantity}"
+                        resolvedCard = candidate
                     )
                 )
             }
+        }
+
+        val accepted = checkedRows.filter { it.status == CsvRowMatchStatus.VERIFIED }
+        val totalCopies = accepted.fold(0) { total, match -> Math.addExact(total, match.row.quantity) }
+        val savedCards = cardDao.upsertAllPreservingState(accepted.map { checkNotNull(it.resolvedCard) })
+        val savedByRow = accepted.map { it.row.rowNumber }.zip(savedCards).toMap()
+        val resolutions = checkedRows.map { resolution ->
+            val card = savedByRow[resolution.row.rowNumber] ?: return@map resolution
+            resolution.copy(
+                resolvedCard = card,
+                statusDetail = "${card.name} (${card.setCode}) #${card.collectorNumber.ifBlank { "—" }} [${card.lang}] × ${resolution.row.quantity}"
+            )
         }
 
         val verified = resolutions.filter { it.status == CsvRowMatchStatus.VERIFIED }
@@ -261,7 +274,7 @@ object DelverCsvImporter {
             conflictRows = conflicts,
             unresolvedRows = unresolved,
             savedCardsCount = verified.mapNotNull { it.resolvedCard?.id }.distinct().size,
-            totalVerifiedCopies = verified.sumOf { it.row.quantity }
+            totalVerifiedCopies = totalCopies
         )
     }
 
@@ -321,19 +334,17 @@ object DelverCsvImporter {
             return null
         }
 
-        // 3. Exact card name ONLY when no printing ID / collector number was provided (NO fuzzy match)
+        // Search the supplied set before considering a name match verified.
         row.name?.let { cardName ->
-            val localMatches = cardDao.findAllByExactNameIgnoreCase(cardName)
-                .filter { it.metadataStatus != CardMetadataStatus.UNRESOLVED }
-            if (localMatches.isNotEmpty()) {
-                if (row.setCode != null) {
-                    return localMatches.firstOrNull { it.setCode.equals(row.setCode, ignoreCase = true) }
-                        ?: localMatches.first()
-                }
-                return localMatches.first()
+            val local = cardDao.findAllByExactNameIgnoreCase(cardName).firstOrNull {
+                it.metadataStatus == CardMetadataStatus.VERIFIED && verifySuppliedFields(row, it).isEmpty()
             }
+            if (local != null) return local
+
             if (canFetchOnline && scryfallApi != null) {
-                return fetchRemoteSafe { scryfallApi.getCardNamedExact(cardName).toCardEntity() }
+                return fetchRemoteSafe {
+                    scryfallApi.getCardNamedExact(cardName, setCode = row.setCode?.lowercase()).toCardEntity()
+                }
             }
         }
         return null
@@ -342,8 +353,8 @@ object DelverCsvImporter {
     internal fun verifySuppliedFields(row: DelverCsvRow, candidate: CardEntity): List<String> {
         val mismatches = mutableListOf<String>()
 
-        if (candidate.metadataStatus == CardMetadataStatus.UNRESOLVED) {
-            mismatches.add("Candidate record '${candidate.name}' is unresolved and cannot verify printing metadata.")
+        if (candidate.metadataStatus != CardMetadataStatus.VERIFIED) {
+            mismatches.add("Candidate record '${candidate.name}' cannot verify Scryfall printing metadata.")
         }
 
         row.scryfallId?.let { expectedPrintingId ->
@@ -395,7 +406,11 @@ object DelverCsvImporter {
         row.name?.let { expectedName ->
             val matchesFull = candidate.name.equals(expectedName, ignoreCase = true)
             val matchesFace = candidate.name.split(" // ").any { it.trim().equals(expectedName, ignoreCase = true) }
-            if (!matchesFull && !matchesFace) {
+            val matchesTokenExport = row.scryfallId != null &&
+                row.scryfallId.equals(candidate.scryfallId, ignoreCase = true) &&
+                candidate.typeLine.substringBefore('—').split(' ').any { it.equals("Token", ignoreCase = true) } &&
+                expectedName.equals("${candidate.name} Token", ignoreCase = true)
+            if (!matchesFull && !matchesFace && !matchesTokenExport) {
                 mismatches.add("Name mismatch: CSV expected '$expectedName', printing is '${candidate.name}'.")
             }
         }

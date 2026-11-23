@@ -13,6 +13,7 @@ import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
 import com.example.domain.DeckAnalytics
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.ai.Chat
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.content
@@ -192,6 +193,10 @@ class OracleChatViewModel(
         viewModelScope.launch {
             replyState.value = OracleReplyState.Loading
             try {
+                if (runCatching { FirebaseApp.getInstance() }.isFailure) {
+                    replyState.value = OracleReplyState.Error("Lattice Oracle is unavailable because this build has no Firebase configuration.")
+                    return@launch
+                }
                 // Ensure activeChatSession is initialized with persisted Room history so memory persists across restarts
                 val chat = activeChatSession ?: run {
                     val savedHistory = chatDao.getMessagesOnce().map { msg ->
@@ -247,6 +252,7 @@ class OracleChatViewModel(
                     replyState.value = OracleReplyState.Error("Lattice Oracle returned an empty response. Please try again.")
                 }
             } catch (e: TimeoutCancellationException) {
+                activeChatSession = null
                 Log.e(TAG, "Oracle chat timed out", e)
                 replyState.value = OracleReplyState.Error(
                     "Request timed out after 60 seconds. Please check your connection and try again."
@@ -254,6 +260,7 @@ class OracleChatViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                activeChatSession = null
                 Log.e(TAG, "Firebase AI chat failed", e)
                 replyState.value = OracleReplyState.Error(
                     e.localizedMessage ?: "Failed to reach Lattice Oracle."

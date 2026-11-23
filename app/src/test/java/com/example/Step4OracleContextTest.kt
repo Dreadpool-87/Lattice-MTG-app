@@ -150,7 +150,7 @@ class Step4OracleContextTest {
             val noOpApi = object : ScryfallApi {
                 override suspend fun searchCards(query: String, order: String) = ScryfallSearchResponse(data = emptyList())
                 override suspend fun getCardNamed(fuzzyName: String) = throw UnsupportedOperationException()
-                override suspend fun getCardNamedExact(exactName: String) = throw UnsupportedOperationException()
+                override suspend fun getCardNamedExact(exactName: String, setCode: String?) = throw UnsupportedOperationException()
                 override suspend fun getCardByScryfallId(scryfallId: String): ScryfallCardDto = throw UnsupportedOperationException()
                 override suspend fun getCardBySetNumberLang(setCode: String, collectorNumber: String, lang: String) = throw UnsupportedOperationException()
                 override suspend fun getCardBySetNumber(setCode: String, collectorNumber: String) = throw UnsupportedOperationException()

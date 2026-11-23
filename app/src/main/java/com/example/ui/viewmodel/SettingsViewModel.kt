@@ -127,17 +127,6 @@ class SettingsViewModel(
         }
     }
 
-    fun clearUnusedRemoteCache() {
-        viewModelScope.launch {
-            val removed = cardRepository.clearUnusedRemoteCache()
-            statusMessageFlow.value = if (removed > 0) {
-                "Cleared $removed unused cached remote cards."
-            } else {
-                "No unused remote cache entries to remove."
-            }
-        }
-    }
-
     fun clearOracleHistory() {
         viewModelScope.launch {
             chatDao.clearConversation()

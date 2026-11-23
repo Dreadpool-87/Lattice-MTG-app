@@ -31,7 +31,8 @@ interface ScryfallApi {
 
     @GET("cards/named")
     suspend fun getCardNamedExact(
-        @Query("exact") exactName: String
+        @Query("exact") exactName: String,
+        @Query("set") setCode: String? = null
     ): ScryfallCardDto
 
     @GET("cards/{id}")

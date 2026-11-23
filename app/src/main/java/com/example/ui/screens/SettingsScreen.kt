@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
@@ -77,7 +76,6 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showClearCacheDialog by remember { mutableStateOf(false) }
     var showClearOracleDialog by remember { mutableStateOf(false) }
     var showResetPrefsDialog by remember { mutableStateOf(false) }
 
@@ -319,17 +317,7 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Verify Base DB", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            OutlinedButton(
-                                onClick = { showClearCacheDialog = true },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("setting_clear_cache_button")
-                            ) {
-                                Icon(Icons.Filled.CleaningServices, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Trim Cache", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+
                         }
                     }
                 }
@@ -432,12 +420,6 @@ fun SettingsScreen(
     }
 
     SettingsConfirmationDialogs(
-        showClearCacheDialog = showClearCacheDialog,
-        onDismissClearCache = { showClearCacheDialog = false },
-        onConfirmClearCache = {
-            showClearCacheDialog = false
-            viewModel.clearUnusedRemoteCache()
-        },
         showClearOracleDialog = showClearOracleDialog,
         onDismissClearOracle = { showClearOracleDialog = false },
         onConfirmClearOracle = {

@@ -79,10 +79,6 @@ class CardRepository(
         cardDao.upsertAllPreservingState(StarterCards.cards)
     }
 
-    suspend fun clearUnusedRemoteCache(): Int {
-        return cardDao.clearUnusedRemoteCache()
-    }
-
     suspend fun importDelverCsv(csvContent: String, offlineOnlyMode: Boolean): DelverImportReport {
         val parsedRows = DelverCsvImporter.parseCsv(csvContent)
         val canFetchOnline = !offlineOnlyMode && networkMonitor.isCurrentlyOnline()
@@ -140,24 +136,14 @@ class CardRepository(
     suspend fun resolveOrCreateCardByName(name: String, offlineOnlyMode: Boolean): CardEntity {
         val trimmed = name.trim()
         val existing = cardDao.findByExactNameIgnoreCase(trimmed)
-        if (existing != null && !existing.id.startsWith("offline-")) {
+        if (existing != null && existing.metadataStatus != CardMetadataStatus.UNRESOLVED) {
             return existing
         }
 
         if (!offlineOnlyMode && networkMonitor.isCurrentlyOnline()) {
             val fetched = runCatching { scryfallApi.getCardNamedExact(trimmed).toCardEntity() }.getOrNull()
             if (fetched != null) {
-                return if (existing != null) {
-                    cardDao.upsertPreservingState(
-                        fetched.copy(
-                            id = existing.id,
-                            isBookmarked = existing.isBookmarked,
-                            isCustom = false
-                        )
-                    )
-                } else {
-                    cardDao.upsertPreservingState(fetched)
-                }
+                return cardDao.upsertPreservingState(fetched)
             }
         }
 

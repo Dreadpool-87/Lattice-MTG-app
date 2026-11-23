@@ -225,7 +225,7 @@ private fun CsvReviewSummarySection(report: DelverImportReport) {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Verified: ${report.totalVerifiedCopies} copies (${report.savedCardsCount} unique printings) saved to Vault",
+                    text = "Verified: ${report.totalVerifiedCopies} copies in CSV. ${report.savedCardsCount} unique printings saved to Vault.",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )

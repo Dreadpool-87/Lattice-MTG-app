@@ -175,9 +175,6 @@ internal fun WubrgThemeOptionCard(
 
 @Composable
 internal fun SettingsConfirmationDialogs(
-    showClearCacheDialog: Boolean,
-    onDismissClearCache: () -> Unit,
-    onConfirmClearCache: () -> Unit,
     showClearOracleDialog: Boolean,
     onDismissClearOracle: () -> Unit,
     onConfirmClearOracle: () -> Unit,
@@ -185,23 +182,6 @@ internal fun SettingsConfirmationDialogs(
     onDismissResetPrefs: () -> Unit,
     onConfirmResetPrefs: () -> Unit
 ) {
-    if (showClearCacheDialog) {
-        AlertDialog(
-            onDismissRequest = onDismissClearCache,
-            icon = { Icon(Icons.Filled.CloudOff, contentDescription = null) },
-            title = { Text("Clear Unused Scryfall Cache?") },
-            text = {
-                Text("Removes remotely cached cards that aren't part of the offline starter catalog or any of your saved decks.")
-            },
-            confirmButton = {
-                Button(onClick = onConfirmClearCache) { Text("Clear Cache") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissClearCache) { Text("Cancel") }
-            }
-        )
-    }
-
     if (showClearOracleDialog) {
         AlertDialog(
             onDismissRequest = onDismissClearOracle,

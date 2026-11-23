@@ -14,6 +14,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
@@ -27,8 +29,15 @@ import kotlinx.coroutines.launch
 internal fun AppUpdateSettings() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var release by remember { mutableStateOf<AppRelease?>(null) }
-    var status by remember { mutableStateOf<String?>(null) }
+    var release by rememberSaveable(
+        stateSaver = listSaver<AppRelease?, Any>(
+            save = { value -> value?.let { listOf(it.tag, it.versionCode, it.sha256) }.orEmpty() },
+            restore = { values ->
+                if (values.isEmpty()) null else AppRelease(values[0] as String, values[1] as Long, values[2] as String)
+            }
+        )
+    ) { mutableStateOf<AppRelease?>(null) }
+    var status by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
     SettingsSectionCard(title = "App updates", icon = Icons.Filled.Refresh) {
