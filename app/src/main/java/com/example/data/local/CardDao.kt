@@ -113,6 +113,25 @@ interface CardDao {
         return cards.map { upsertPreservingState(it) }
     }
 
+    @Query("SELECT * FROM cards WHERE scryfallId = :id LIMIT 1")
+    suspend fun findByCanonicalScryfallId(id: String): CardEntity?
+
+    suspend fun storeCatalogPrinting(card: CardEntity) {
+        val existing = getCardById(card.id) ?: findByCanonicalScryfallId(card.scryfallId)
+        if (existing == null) {
+            insertIgnore(card)
+        } else {
+            updateCardInPlace(card.copy(
+                id = existing.id,
+                rarity = existing.rarity.takeUnless { it == "unknown" } ?: card.rarity,
+                isBookmarked = existing.isBookmarked,
+                imageUri = existing.imageUri,
+                rulingsJson = existing.rulingsJson,
+                cardFacesJson = existing.cardFacesJson.ifBlank { card.cardFacesJson }
+            ))
+        }
+    }
+
     @Query("UPDATE cards SET isBookmarked = :bookmarked WHERE id = :cardId")
     suspend fun updateBookmark(cardId: String, bookmarked: Boolean)
 

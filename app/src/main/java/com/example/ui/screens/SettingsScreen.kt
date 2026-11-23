@@ -73,7 +73,8 @@ fun SettingsScreen(
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onOpenAbout: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    offlineCatalog: com.example.data.repository.OfflineCatalogRepository? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showClearOracleDialog by remember { mutableStateOf(false) }
@@ -134,6 +135,9 @@ fun SettingsScreen(
                     .widthIn(max = 720.dp)
             ) {
                 item { AppUpdateSettings() }
+                if (offlineCatalog != null) {
+                    item { OfflineCatalogSettings(offlineCatalog, uiState.offlineOnlyMode) }
+                }
 
                 // 1. WUBRG 5-Theme Selector & Brightness Mode
                 item {

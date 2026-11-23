@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -418,10 +419,13 @@ class Step2ImportAndMigrationTest {
             composeRule.setContent {
                 LatticeMtgTheme {
                     val snackbarHostState = remember { SnackbarHostState() }
+                    val catalog = remember { androidx.compose.runtime.mutableStateOf(false) }
                     VaultScreen(
                         viewModel = viewModel,
                         snackbarHostState = snackbarHostState,
-                        onOpenSettings = {}
+                        onOpenSettings = {},
+                        onOpenCatalog = { catalog.value = true },
+                        onBackFromCatalog = if (catalog.value) ({ catalog.value = false }) else null
                     )
                 }
             }
@@ -431,6 +435,10 @@ class Step2ImportAndMigrationTest {
                 viewModel.uiState.value.cards.any { it.id == solRing.id }
             }
 
+            composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
+            composeRule.onNodeWithText("Browse catalog").performClick()
+            composeRule.onNodeWithTag("type_filter_artifact").assertDoesNotExist()
+            composeRule.onNodeWithTag("vault_catalog_filters").performClick()
             // Apply search + type filter
             composeRule.onNodeWithTag("vault_search_input").performTextInput("Sol Ring")
             composeRule.onNodeWithTag("type_filter_artifact").performClick()
@@ -457,6 +465,7 @@ class Step2ImportAndMigrationTest {
             assertEquals("Artifact", viewModel.uiState.value.selectedType)
             composeRule.onNodeWithTag("vault_card_${solRing.id}").assertIsDisplayed()
 
+            composeRule.onNodeWithContentDescription("Back to collections").performClick()
             // Clear filters and verify CSV Import dialog flow
             viewModel.clearFilters()
             composeRule.waitForIdle()

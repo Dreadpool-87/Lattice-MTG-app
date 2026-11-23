@@ -33,6 +33,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -60,8 +61,6 @@ import com.example.ui.screens.SynergyAnalyzerScreen
 import com.example.ui.screens.TabletopScreen
 import com.example.ui.screens.VaultScreen
 import com.example.ui.theme.LatticeMtgTheme
-import com.example.ui.theme.ThemeBrightnessMode
-import com.example.ui.theme.WubrgTheme
 import com.example.ui.viewmodel.DeckDetailViewModel
 import com.example.ui.viewmodel.DecksViewModel
 import com.example.ui.viewmodel.OracleChatViewModel
@@ -74,6 +73,7 @@ object Routes {
     const val DECKS = "decks"
     const val SYNERGY = "synergy"
     const val VAULT = "vault"
+    const val VAULT_CATALOG = "vault/catalog"
     const val ORACLE = "oracle"
     const val TABLETOP = "tabletop"
     const val SETTINGS = "settings"
@@ -103,16 +103,13 @@ class MainActivity : ComponentActivity() {
         val container = (application as LatticeApp).container
 
         setContent {
-            val wubrgTheme by container.preferencesRepository.wubrgTheme
-                .collectAsStateWithLifecycle(initialValue = WubrgTheme.GREEN)
-            val brightnessMode by container.preferencesRepository.themeBrightnessMode
-                .collectAsStateWithLifecycle(initialValue = ThemeBrightnessMode.SYSTEM)
+            val appearance by container.preferencesRepository.appearance
+                .collectAsStateWithLifecycle(initialValue = null)
 
-            LatticeMtgTheme(
-                wubrgTheme = wubrgTheme,
-                brightnessMode = brightnessMode
-            ) {
-                LatticeRootApp(container = container)
+            appearance?.let { saved ->
+                LatticeMtgTheme(saved.theme, saved.brightness) {
+                    LatticeRootApp(container = container)
+                }
             }
         }
     }
@@ -173,6 +170,24 @@ fun LatticeRootApp(container: AppContainer) {
             networkMonitor = container.networkMonitor
         )
     )
+
+    val offlineCatalog = container.offlineCatalog
+    val catalogManifest by offlineCatalog.manifest.collectAsStateWithLifecycle()
+    val catalogInstalled by offlineCatalog.installed.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val newerCardData = catalogManifest?.packs.orEmpty().any {
+        it.id in catalogInstalled && catalogInstalled[it.id] != it.sha256
+    }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute in setOf(Routes.VAULT, Routes.VAULT_CATALOG, Routes.SETTINGS)) {
+            try {
+                offlineCatalog.check()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The cached cards stay available when the update check fails.
+            }
+        }
+    }
 
     val tabs = remember {
         listOf(
@@ -337,7 +352,18 @@ fun LatticeRootApp(container: AppContainer) {
                         VaultScreen(
                             viewModel = vaultViewModel,
                             snackbarHostState = snackbarHostState,
-                            onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                            onOpenCatalog = { navController.navigate(Routes.VAULT_CATALOG) },
+                            newerCardData = newerCardData
+                        )
+                    }
+
+                    composable(Routes.VAULT_CATALOG) {
+                        VaultScreen(
+                            viewModel = vaultViewModel,
+                            snackbarHostState = snackbarHostState,
+                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                            onBackFromCatalog = { navController.popBackStack() }
                         )
                     }
 
@@ -361,7 +387,8 @@ fun LatticeRootApp(container: AppContainer) {
                             viewModel = settingsViewModel,
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
-                            onOpenAbout = { navController.navigate(Routes.ABOUT) }
+                            onOpenAbout = { navController.navigate(Routes.ABOUT) },
+                            offlineCatalog = offlineCatalog
                         )
                     }
 
