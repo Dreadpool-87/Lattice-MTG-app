@@ -68,7 +68,6 @@ fun SynergyAnalyzerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val report = uiState.report
-    val visibleRelationships = uiState.visibleRelationships
 
     Box(
         contentAlignment = Alignment.TopCenter,
@@ -282,16 +281,18 @@ fun SynergyAnalyzerScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 SynergyMetricTile(
-                                    label = "Primary Fit",
-                                    value = primary?.let { "${it.matchScore}%" } ?: "—",
-                                    accent = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                SynergyMetricTile(
-                                    label = "Avg CMC",
-                                    value = "%.2f".format(report.roles.avgCmc),
+                                    label = "Avg. Mana Value",
+                                    value = report.roles.avgCmc?.let { "%.2f".format(it) } ?: "—",
                                     accent = MaterialTheme.colorScheme.secondary,
                                     modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            if (report.skippedCopies > 0) {
+                                Text(
+                                    text = "${report.skippedCopies} copies without verified card data were excluded from the analysis.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
@@ -314,7 +315,7 @@ fun SynergyAnalyzerScreen(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(
-                                                text = "Detected Archetype: ${primary.template.name}",
+                                                text = "Possible Archetype: ${primary.template.name}",
                                                 style = MaterialTheme.typography.titleSmall,
                                                 color = LatticeSparkGreen
                                             )
@@ -326,6 +327,12 @@ fun SynergyAnalyzerScreen(
                                         }
                                     }
                                 }
+                            } else {
+                                Text(
+                                    text = "Insufficient evidence to suggest an archetype.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -354,12 +361,12 @@ fun SynergyAnalyzerScreen(
                                     )
                                     Text(
                                         text = if (uiState.selectedCardId == null) {
-                                            "Tap any card node to isolate its direct combos & synergies."
+                                            "Tap a card to focus its links."
                                         } else {
-                                            val name = report.graphNodes.firstOrNull {
+                                            val name = report.deckWithEntries.entries.firstOrNull {
                                                 it.card.id == uiState.selectedCardId
                                             }?.card?.name ?: "Selected card"
-                                            "Focused on $name — tap again to show all links."
+                                            "Focused on $name. Tap again to clear card focus."
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -375,9 +382,15 @@ fun SynergyAnalyzerScreen(
                                 }
                             }
 
+                            val graphLinks = uiState.graphRelationships
+                            val nodeCount = graphLinks.flatMap { listOf(it.cardA.id, it.cardB.id) }.distinct().size
+                            Text(
+                                text = "Graph: $nodeCount cards, ${graphLinks.size} of ${uiState.filteredRelationships.size} links",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             SynergyCardLatticeCanvas(
-                                nodes = report.graphNodes,
-                                relationships = report.relationships,
+                                relationships = graphLinks,
                                 selectedCardId = uiState.selectedCardId,
                                 onSelectCard = viewModel::selectCardNode
                             )
@@ -392,11 +405,11 @@ fun SynergyAnalyzerScreen(
                                 FilterChip(
                                     selected = uiState.selectedRelationshipFilter == null,
                                     onClick = { viewModel.setRelationshipFilter(null) },
-                                    label = { Text("All (${report.relationships.size})") },
+                                    label = { Text("All (${uiState.focusedRelationships.size})") },
                                     modifier = Modifier.testTag("rel_filter_all")
                                 )
                                 RelationshipType.entries.forEach { relType ->
-                                    val count = report.relationships.count { it.type == relType }
+                                    val count = uiState.focusedRelationships.count { it.type == relType }
                                     if (count > 0) {
                                         FilterChip(
                                             selected = uiState.selectedRelationshipFilter == relType,
@@ -419,13 +432,13 @@ fun SynergyAnalyzerScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Highlighted Card Relationships (${visibleRelationships.size})",
+                            text = "Card links (${uiState.listedRelationships.size} of ${uiState.filteredRelationships.size})",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
                 }
 
-                if (visibleRelationships.isEmpty()) {
+                if (uiState.listedRelationships.isEmpty()) {
                     item {
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -433,7 +446,7 @@ fun SynergyAnalyzerScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "No card relationships match the active filter. Tap Reset or add overlapping synergy cards to this deck.",
+                                text = "No card links match the current selection.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(16.dp)
@@ -441,7 +454,7 @@ fun SynergyAnalyzerScreen(
                         }
                     }
                 } else {
-                    items(visibleRelationships.take(12), key = { it.id }) { rel ->
+                    items(uiState.listedRelationships, key = { it.id }) { rel ->
                         RelationshipDetailCard(
                             relationship = rel,
                             onSelectCard = viewModel::selectCardNode
@@ -484,15 +497,10 @@ fun SynergyAnalyzerScreen(
                     val activeMatch = report.archetypeMatches.firstOrNull {
                         it.template.id == uiState.selectedArchetypeId
                     } ?: report.archetypeMatches.first()
-                    val deckCardNames = report.deckWithEntries.entries
-                        .map { it.card.name }
-                        .toSet()
-
                     ArchetypeBlueprintCard(
                         template = activeMatch.template,
-                        matchResult = activeMatch,
                         roles = report.roles,
-                        deckCardNames = deckCardNames
+                        deckCardNames = report.analyzedCardNames
                     )
                 }
             }

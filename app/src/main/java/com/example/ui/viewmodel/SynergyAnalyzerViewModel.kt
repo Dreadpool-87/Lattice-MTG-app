@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.DeckWithEntries
 import com.example.data.repository.DeckRepository
-import com.example.domain.ArchetypeTemplate
 import com.example.domain.CardRelationship
 import com.example.domain.RelationshipType
 import com.example.domain.SynergyAnalyzerEngine
@@ -24,25 +23,23 @@ data class SynergyAnalyzerUiState(
     val selectedRelationshipFilter: RelationshipType? = null,
     val selectedArchetypeId: String = SynergyAnalyzerEngine.commonArchetypes.first().id
 ) {
-    val visibleRelationships: List<CardRelationship>
-        get() {
-            val all = report?.relationships.orEmpty()
-            val byCard = if (selectedCardId != null) {
-                all.filter { it.cardA.id == selectedCardId || it.cardB.id == selectedCardId }
-            } else {
-                all
-            }
-            val filter = selectedRelationshipFilter
-            return if (filter != null) {
-                byCard.filter { it.type == filter }
-            } else {
-                byCard
+    val focusedRelationships: List<CardRelationship> = report?.relationships.orEmpty().filter {
+        selectedCardId == null || it.cardA.id == selectedCardId || it.cardB.id == selectedCardId
+    }
+    val filteredRelationships: List<CardRelationship> = focusedRelationships.filter {
+        selectedRelationshipFilter == null || it.type == selectedRelationshipFilter
+    }
+    val listedRelationships: List<CardRelationship> = filteredRelationships.take(12)
+    val graphRelationships: List<CardRelationship> = buildList {
+        val nodeIds = mutableSetOf<String>()
+        filteredRelationships.forEach { link ->
+            val endpoints = setOf(link.cardA.id, link.cardB.id)
+            if (nodeIds.size + endpoints.count { it !in nodeIds } <= 8) {
+                nodeIds.addAll(endpoints)
+                add(link)
             }
         }
-
-    val activeArchetypeTemplate: ArchetypeTemplate
-        get() = SynergyAnalyzerEngine.commonArchetypes.firstOrNull { it.id == selectedArchetypeId }
-            ?: SynergyAnalyzerEngine.commonArchetypes.first()
+    }
 }
 
 class SynergyAnalyzerViewModel(
@@ -54,22 +51,24 @@ class SynergyAnalyzerViewModel(
     private val selectedRelFilter = MutableStateFlow<RelationshipType?>(null)
     private val selectedArchetypeId = MutableStateFlow<String?>(null)
 
+    private val analysis = combine(deckRepository.allDecks, selectedDeckId) { decks, chosenDeckId ->
+        val deck = decks.firstOrNull { it.deck.id == chosenDeckId } ?: decks.firstOrNull()
+        decks to deck?.let(SynergyAnalyzerEngine::analyzeDeck)
+    }
+
     val uiState: StateFlow<SynergyAnalyzerUiState> = combine(
-        deckRepository.allDecks,
-        selectedDeckId,
+        analysis,
         selectedCardId,
         selectedRelFilter,
         selectedArchetypeId
-    ) { decks, chosenDeckId, cardId, relFilter, chosenArchetypeId ->
-        val effectiveDeck = decks.firstOrNull { it.deck.id == chosenDeckId } ?: decks.firstOrNull()
-        val report = effectiveDeck?.let { SynergyAnalyzerEngine.analyzeDeck(it) }
+    ) { (decks, report), cardId, relFilter, chosenArchetypeId ->
         val defaultArchetypeId = report?.primaryArchetype?.template?.id
             ?: SynergyAnalyzerEngine.commonArchetypes.first().id
         val effectiveArchetypeId = chosenArchetypeId ?: defaultArchetypeId
 
         SynergyAnalyzerUiState(
             decks = decks,
-            selectedDeckId = effectiveDeck?.deck?.id,
+            selectedDeckId = report?.deckWithEntries?.deck?.id,
             report = report,
             selectedCardId = cardId,
             selectedRelationshipFilter = relFilter,
