@@ -1,6 +1,20 @@
 package com.example
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -14,6 +28,7 @@ import com.example.data.local.DeckEntryEntity
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
+import com.example.data.local.StarterCards
 import com.example.domain.CardFaceInfo
 import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
@@ -26,6 +41,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -266,7 +282,97 @@ class Step3DataAndValidationTest {
         composeRule.onNodeWithTag("card_printing_variants_section").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("MID #47 (EN)").performScrollTo().assertIsDisplayed()
 
-        composeRule.onNodeWithTag("card_rulings_section").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("sheet_open_rulings").performScrollTo().performClick()
+        composeRule.onNodeWithTag("card_rulings_section").assertIsDisplayed()
         composeRule.onNodeWithText("2011-09-22 • WOTC").performScrollTo().assertIsDisplayed()
     }
+
+    @Test
+    fun cardInspectorSwipesBetweenCardsAndEnlargesTheSelectedSide() {
+        val starter = StarterCards.cards.first()
+        val twoSided = starter.copy(
+            name = "Two-sided test card",
+            imageUri = null,
+            cardFacesJson = CardJsonCodec.encodeFaces(listOf(
+                CardFaceInfo("Front", imageUri = "https://example.invalid/front.jpg"),
+                CardFaceInfo("Back", imageUri = "https://example.invalid/back.jpg")
+            ))
+        )
+        val neighbor = starter.copy(id = "neighbor", name = "Neighbor test card", imageUri = null)
+        val selected = mutableStateOf(twoSided)
+
+        composeRule.setContent {
+            LatticeMtgTheme {
+                CardInspectorSheet(
+                    card = selected.value,
+                    decks = emptyList(),
+                    isOnline = false,
+                    showCardArt = true,
+                    onDismiss = { error("Scrolling must not close card details") },
+                    onToggleBookmark = {},
+                    onAddToDeck = { _, _ -> },
+                    onPrevious = if (selected.value == neighbor) ({ selected.value = twoSided }) else null,
+                    onNext = if (selected.value == twoSided) ({ selected.value = neighbor }) else null
+                )
+            }
+        }
+
+        val details = composeRule.onNodeWithTag("sheet_card_details")
+        details.performTouchInput { swipeDown() }
+        details.assertIsDisplayed()
+        details.performTouchInput { swipeLeft() }
+        composeRule.onNodeWithText(neighbor.name).assertIsDisplayed()
+        details.performTouchInput { swipeRight() }
+        composeRule.onNodeWithText("Show back").performScrollTo().performClick()
+        composeRule.onNodeWithContentDescription("${twoSided.name} · back").performScrollTo().performClick()
+        composeRule.onNodeWithTag("sheet_enlarged_art").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
+        composeRule.onNodeWithText("Show front").assertIsDisplayed()
+    }
+    @Test
+    @Config(sdk = [36], qualifiers = "w360dp-h640dp")
+    fun cardInspectorScrollsPastTheEntireLastRulingWithNavigationInsets() {
+        val lastComment = "If the target is still legal as the spell resolves but the spell can't be " +
+            "countered, its controller still creates two Treasure tokens."
+        val rulings = (1..8).map { index ->
+            CardRulingInfo("2022-04-29", comment = "Ruling $index. " + lastComment)
+        } + CardRulingInfo("2022-04-29", comment = lastComment)
+
+        composeRule.setContent {
+            LatticeMtgTheme {
+                CardInspectorSheet(
+                    card = StarterCards.cards.first(),
+                    decks = emptyList(),
+                    isOnline = false,
+                    showCardArt = false,
+                    onDismiss = {},
+                    onToggleBookmark = {},
+                    onAddToDeck = { _, _ -> },
+                    rulings = rulings
+                )
+            }
+        }
+        composeRule.onNodeWithTag("sheet_open_rulings").performClick()
+        composeRule.runOnIdle {
+            val window = checkNotNull(ShadowDialog.getLatestDialog().window)
+            val navBarHeight = (72 * window.decorView.resources.displayMetrics.density).toInt()
+            ViewCompat.dispatchApplyWindowInsets(
+                window.decorView,
+                WindowInsetsCompat.Builder()
+                    .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navBarHeight))
+                    .build()
+            )
+        }
+        val scrollArea = composeRule.onNodeWithTag("card_rulings_list")
+        scrollArea.performScrollToIndex(rulings.lastIndex)
+
+        val lastRuling = composeRule.onNodeWithText(lastComment).assertIsDisplayed()
+        assertTrue(lastRuling.getBoundsInRoot() == lastRuling.getUnclippedBoundsInRoot())
+        val listBottom = scrollArea.getBoundsInRoot().bottom
+        assertTrue(listBottom - lastRuling.getBoundsInRoot().bottom >= 28.dp)
+        composeRule.onNodeWithContentDescription("Back to card details").performClick()
+        composeRule.onNodeWithTag("sheet_card_details").assertIsDisplayed()
+        composeRule.onNodeWithTag("sheet_open_rulings").assertIsDisplayed()
+    }
+
 }

@@ -74,7 +74,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenAbout: () -> Unit,
     modifier: Modifier = Modifier,
-    offlineCatalog: com.example.data.repository.OfflineCatalogRepository? = null
+    offlineCatalog: com.example.data.repository.OfflineCatalogRepository? = null,
+    offlineArtwork: com.example.data.repository.OfflineArtworkRepository? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showClearOracleDialog by remember { mutableStateOf(false) }
@@ -137,6 +138,9 @@ fun SettingsScreen(
                 item { AppUpdateSettings() }
                 if (offlineCatalog != null) {
                     item { OfflineCatalogSettings(offlineCatalog, uiState.offlineOnlyMode) }
+                }
+                if (offlineArtwork != null) {
+                    item { OfflineArtworkSettings(offlineArtwork, uiState.offlineOnlyMode) }
                 }
 
                 // 1. WUBRG 5-Theme Selector & Brightness Mode

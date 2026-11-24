@@ -1,0 +1,143 @@
+package com.example
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import com.example.data.local.LatticeDatabase
+import com.example.data.local.StarterCards
+import com.example.data.repository.ArtworkCard
+import com.example.data.repository.ArtworkSelection
+import com.example.data.repository.OfflineArtworkRepository
+import com.example.data.repository.ArtworkQuality
+import com.example.data.repository.ArtworkSide
+import com.example.domain.CardFaceInfo
+import com.example.domain.CardJsonCodec
+import com.example.data.repository.OfflineCatalogRepository
+import com.example.data.repository.PreferencesRepository
+import com.example.data.repository.artworkImageTargets
+import com.example.data.repository.artworkTargets
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowStatFs
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
+import java.io.File
+import javax.imageio.ImageIO
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
+class OfflineArtworkTest {
+    private val englishId = "158b311e-2c41-4e09-a560-147a17ec6c94"
+    private val alternateId = "258b311e-2c41-4e09-a560-147a17ec6c94"
+
+    @Test
+    fun allCardsKeepsOnePrintingPerCardWhileOtherSelectionsKeepDistinctPrintings() {
+        val english = ArtworkCard("english", englishId, "same-card", "FDN", "777", "en", null)
+        val alternate = english.copy(id = "alternate", scryfallId = alternateId, lang = "fr", setCode = "AFR")
+        val cards = listOf(alternate, english, english, english.copy(scryfallId = "unresolved"))
+        assertEquals(listOf(alternate, english), artworkTargets(cards, representative = false))
+        assertEquals(listOf(english), artworkTargets(cards, representative = true))
+    }
+
+    @Test
+    fun physicalBackIsAnImageTargetButSharedArtworkIsNotDuplicated() {
+        val front = CardFaceInfo("Front", imageUri = "https://cards.scryfall.io/normal/front/1/5/$englishId.jpg")
+        val back = CardFaceInfo("Back", imageUri = "https://cards.scryfall.io/normal/back/1/5/$englishId.jpg")
+        val card = ArtworkCard("two", englishId, "two", "MID", "1", "en", front.imageUri)
+        val both = card.copy(cardFacesJson = CardJsonCodec.encodeFaces(listOf(front, back)))
+        val shared = card.copy(cardFacesJson = CardJsonCodec.encodeFaces(listOf(
+            front.copy(imageUri = null), back.copy(imageUri = null)
+        )))
+        assertEquals(listOf(ArtworkSide.FRONT, ArtworkSide.BACK), artworkImageTargets(listOf(both)).map { it.side })
+        assertEquals(listOf(ArtworkSide.FRONT), artworkImageTargets(listOf(shared)).map { it.side })
+    }
+
+    @Test
+    fun collectionDownloadSavesBothSidesAndUpgradesThemToHd() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        val preferences = PreferencesRepository(context)
+        val jpeg = ByteArrayOutputStream()
+        ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "jpeg", jpeg)
+        val image = jpeg.toByteArray()
+        val path = File(context.filesDir, "offline-card-art/$englishId.jpg")
+        val hdPath = File(context.filesDir, "offline-card-art/$englishId-hd.jpg")
+        val sdBack = File(context.filesDir, "offline-card-art/$englishId-back.jpg")
+        val hdBack = File(context.filesDir, "offline-card-art/$englishId-back-hd.jpg")
+        val files = listOf(path, hdPath, sdBack, hdBack)
+        files.forEach { it.delete() }
+        ShadowStatFs.registerStats(context.filesDir, 10_000, 0, 0)
+        try {
+            preferences.setOfflineOnlyMode(false)
+            val card = StarterCards.cards.first().copy(
+                id = "sf-$englishId", scryfallId = englishId, imageUri = null,
+                cardFacesJson = CardJsonCodec.encodeFaces(listOf(CardFaceInfo("Front"), CardFaceInfo("Back")))
+            )
+            database.cardDao().upsertAllPreservingState(listOf(card))
+            database.vaultCollectionDao().saveSnapshot("Binder", mapOf(card.id to 4), replace = false, complete = true)
+            database.vaultCollectionDao().saveSnapshot("Other list", mapOf(card.id to 1), replace = false, complete = true)
+
+            var requests = 0
+            val client = OkHttpClient.Builder().addInterceptor { chain ->
+                val request = chain.request()
+                val size = if (requests < 2) "normal" else "large"
+                val side = if (requests % 2 == 0) "front" else "back"
+                assertEquals("https://cards.scryfall.io/$size/$side/1/5/$englishId.jpg", request.url.toString())
+                requests++
+                Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .body(image.toResponseBody("image/jpeg".toMediaType())).build()
+            }.build()
+            val catalog = OfflineCatalogRepository(context, database, preferences)
+            val repository = OfflineArtworkRepository(context, database, preferences, catalog, client)
+
+            repository.prepare(ArtworkSelection.Collection)
+            val preview = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(preview.message, 2, preview.remaining)
+            repository.download()
+            val fullDevice = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(2, fullDevice.remaining)
+            assertEquals(0, requests)
+
+            ShadowStatFs.registerStats(context.filesDir, 10_000, 9_000, 9_000)
+            repository.download()
+            val done = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(done.message, 2, done.onDevice)
+            assertArrayEquals(image, OfflineArtworkRepository.localFile(context, englishId)?.readBytes())
+            assertArrayEquals(image, OfflineArtworkRepository.localFile(context, englishId, ArtworkSide.BACK)?.readBytes())
+
+            repository.prepare(ArtworkSelection.Collection)
+            val repeat = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(2, repeat.onDevice)
+            assertEquals(0, repeat.remaining)
+            assertEquals(2, requests)
+
+            repository.prepare(ArtworkSelection.Collection, ArtworkQuality.HD)
+            val upgrade = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(2, upgrade.remaining)
+            repository.download()
+            val upgraded = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(upgraded.message, 2, upgraded.onDevice)
+            assertEquals(hdPath, OfflineArtworkRepository.localFile(context, englishId))
+            assertEquals(hdBack, OfflineArtworkRepository.localFile(context, englishId, ArtworkSide.BACK))
+            assertEquals(false, path.exists())
+            assertEquals(false, sdBack.exists())
+            assertEquals(4, requests)
+        } finally {
+            ShadowStatFs.unregisterStats(context.filesDir)
+            files.forEach { it.delete() }
+            database.close()
+        }
+    }
+}

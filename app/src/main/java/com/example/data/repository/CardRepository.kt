@@ -99,8 +99,8 @@ class CardRepository(
         return (byOracle + byName).distinctBy { it.id }
     }
 
-    suspend fun fetchAndCacheArtwork(card: CardEntity, offlineOnlyMode: Boolean): String? {
-        cardDao.getCardById(card.id)?.imageUri?.let { return it }
+    suspend fun fetchAndCacheArtwork(card: CardEntity, offlineOnlyMode: Boolean): CardEntity? {
+        cardDao.getCardById(card.id)?.takeUnless { it.imageUri.isNullOrBlank() }?.let { return it }
         if (card.isCustom || offlineOnlyMode || !networkMonitor.isCurrentlyOnline()) return null
 
         return try {
@@ -111,8 +111,10 @@ class CardRepository(
                 scryfallApi.getCardNamedExact(card.name, setCode).toCardEntity()
             }
             val image = printing.imageUri?.takeIf { it.startsWith("https://") }
-            if (image != null) cardDao.updateArtwork(card.id, image)
-            image
+            if (image == null) return null
+            val faces = printing.cardFacesJson.ifBlank { card.cardFacesJson }
+            cardDao.updateArtwork(card.id, image, faces)
+            card.copy(imageUri = image, cardFacesJson = faces)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

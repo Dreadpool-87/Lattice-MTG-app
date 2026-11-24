@@ -33,7 +33,7 @@ import com.example.data.local.VaultCollectionCard
 @Composable
 internal fun VaultCollections(
     collections: Map<String, List<VaultCollectionCard>>,
-    onOpenCard: (CardEntity) -> Unit
+    onOpenCard: (List<CardEntity>, CardEntity) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     LazyColumn(
@@ -72,9 +72,10 @@ internal fun VaultCollections(
                 }
             }
             if (isExpanded) {
-                items(entries.sortedBy { it.card.name.lowercase() }, key = { "entry:$name:${it.card.id}" }) { entry ->
+                val ordered = entries.sortedBy { it.card.name.lowercase() }
+                items(ordered, key = { "entry:$name:${it.card.id}" }) { entry ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { onOpenCard(entry.card) }.padding(14.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenCard(ordered.map { it.card }, entry.card) }.padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {

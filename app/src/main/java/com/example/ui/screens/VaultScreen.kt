@@ -52,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.local.CardEntity
 import com.example.ui.components.CardInspectorSheet
+import com.example.data.repository.OfflineArtworkRepository
 import com.example.ui.components.ManaSymbolPip
 import com.example.ui.viewmodel.VaultViewModel
 
@@ -79,7 +81,7 @@ fun VaultScreen(
     val collections by viewModel.collections.collectAsStateWithLifecycle()
     val showCollections = onBackFromCatalog == null
     var filtersExpanded by rememberSaveable { mutableStateOf(false) }
-    var inspectedCard by remember { mutableStateOf<CardEntity?>(null) }
+    var inspectedCard by remember { mutableStateOf<Pair<List<CardEntity>, CardEntity>?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
 
@@ -294,7 +296,7 @@ fun VaultScreen(
             }
 
             if (showCollections) {
-                VaultCollections(collections, onOpenCard = { inspectedCard = it })
+                VaultCollections(collections, onOpenCard = { cards, card -> inspectedCard = cards to card })
             } else if (uiState.cards.isEmpty()) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -329,7 +331,7 @@ fun VaultScreen(
                     items(uiState.cards, key = { it.id }) { card ->
                         VaultCardRow(
                             card = card,
-                            onClick = { inspectedCard = card },
+                            onClick = { inspectedCard = uiState.cards to card },
                             onToggleBookmark = { viewModel.toggleBookmark(card) }
                         )
                     }
@@ -352,8 +354,8 @@ fun VaultScreen(
         }
     }
 
-    inspectedCard?.let { card ->
-        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null })
+    inspectedCard?.let { (cards, card) ->
+        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards)
     }
 
     if (showCreateCardDialog) {
@@ -384,17 +386,28 @@ fun VaultScreen(
 
 
 @Composable
-internal fun CatalogCardInspector(viewModel: VaultViewModel, card: CardEntity, onDismiss: () -> Unit) {
+internal fun CatalogCardInspector(
+    viewModel: VaultViewModel,
+    initialCard: CardEntity,
+    onDismiss: () -> Unit,
+    cards: List<CardEntity> = listOf(initialCard)
+) {
+    var index by remember(initialCard.id, cards) {
+        mutableStateOf(cards.indexOfFirst { it.id == initialCard.id })
+    }
+    val card = cards.getOrNull(index) ?: initialCard
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val extras by viewModel.inspectionExtras.collectAsStateWithLifecycle()
     val liveCard = state.cards.firstOrNull { it.id == card.id } ?: card
     val current = extras.takeIf { it.cardId == card.id }
     val art = liveCard.imageUri ?: current?.imageUri
+    val context = LocalContext.current
     LaunchedEffect(card.id, state.showCardArt, state.isOnline, state.offlineOnlyMode) {
-        viewModel.loadCardInspectionExtras(liveCard)
+        val localArt = OfflineArtworkRepository.localFile(context, liveCard.scryfallId)
+        viewModel.loadCardInspectionExtras(liveCard, fetchArtwork = localArt == null)
     }
     CardInspectorSheet(
-        card = liveCard.copy(imageUri = art),
+        card = liveCard.copy(imageUri = art, cardFacesJson = current?.artworkFacesJson ?: liveCard.cardFacesJson),
         decks = state.decks,
         isOnline = state.isOnline && !state.offlineOnlyMode,
         showCardArt = state.showCardArt,
@@ -409,6 +422,8 @@ internal fun CatalogCardInspector(viewModel: VaultViewModel, card: CardEntity, o
         } else null,
         printingVariants = current?.printingVariants.orEmpty(),
         rulings = current?.rulings.orEmpty(),
-        isLoadingRulings = current?.isLoadingRulings == true
+        isLoadingRulings = current?.isLoadingRulings == true,
+        onPrevious = if (index > 0) ({ index-- }) else null,
+        onNext = if (index >= 0 && index < cards.lastIndex) ({ index++ }) else null
     )
 }

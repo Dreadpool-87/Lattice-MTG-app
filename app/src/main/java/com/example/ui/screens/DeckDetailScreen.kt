@@ -89,7 +89,7 @@ fun DeckDetailScreen(
     onBack: () -> Unit,
     onAskOracleAboutDeck: (Long) -> Unit,
     onOpenSynergyAnalyzer: (Long) -> Unit,
-    cardInspector: @Composable (CardEntity, () -> Unit) -> Unit,
+    cardInspector: @Composable (List<CardEntity>, CardEntity, () -> Unit) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -101,7 +101,7 @@ fun DeckDetailScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddPicker by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
-    var inspectedCard by remember { mutableStateOf<CardEntity?>(null) }
+    var inspectedCard by remember { mutableStateOf<Pair<List<CardEntity>, CardEntity>?>(null) }
 
     LaunchedEffect(uiState.snackbarMessage) {
         val msg = uiState.snackbarMessage
@@ -249,7 +249,7 @@ fun DeckDetailScreen(
                             DeckZones.MAYBEBOARD to deckWithEntries.maybeboardEntries.sumOf { it.entry.quantity }
                         ),
                         onSelectZone = viewModel::setActiveZone,
-                        onInspectCard = { inspectedCard = it },
+                        onInspectCard = { cards, card -> inspectedCard = cards to card },
                         onAdjustQty = { cardId, delta -> viewModel.adjustQuantity(cardId, uiState.activeZone, delta) },
                         onMoveZone = { cardId, toZone -> viewModel.moveZone(cardId, uiState.activeZone, toZone) },
                         modifier = Modifier.weight(1f)
@@ -466,7 +466,7 @@ fun DeckDetailScreen(
         }
     }
 
-    inspectedCard?.let { card -> cardInspector(card) { inspectedCard = null } }
+    inspectedCard?.let { (cards, card) -> cardInspector(cards, card) { inspectedCard = null } }
 
     if (showAddPicker) {
         AddCardPickerDialog(
@@ -500,7 +500,7 @@ private fun DeckListZoneTab(
     activeZone: String,
     zoneCounts: Map<String, Int>,
     onSelectZone: (String) -> Unit,
-    onInspectCard: (CardEntity) -> Unit,
+    onInspectCard: (List<CardEntity>, CardEntity) -> Unit,
     onAdjustQty: (String, Int) -> Unit,
     onMoveZone: (String, String) -> Unit,
     modifier: Modifier = Modifier
@@ -539,15 +539,16 @@ private fun DeckListZoneTab(
                 )
             }
         } else {
+            val ordered = remember(deckEntries) { deckEntries.sortedBy { it.card.cmc } }
             LazyColumn(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(deckEntries.sortedBy { it.card.cmc }, key = { it.entry.id }) { item ->
+                items(ordered, key = { it.entry.id }) { item ->
                     DeckEntryRow(
                         item = item,
-                        onInspect = { onInspectCard(item.card) },
+                        onInspect = { onInspectCard(ordered.map { it.card }, item.card) },
                         onDecrement = { onAdjustQty(item.card.id, -1) },
                         onIncrement = { onAdjustQty(item.card.id, 1) },
                         onMoveZone = { toZone -> onMoveZone(item.card.id, toZone) }
