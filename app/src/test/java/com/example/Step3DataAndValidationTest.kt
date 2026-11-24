@@ -375,4 +375,35 @@ class Step3DataAndValidationTest {
         composeRule.onNodeWithTag("sheet_open_rulings").assertIsDisplayed()
     }
 
+    @Test
+    @Config(sdk = [36], qualifiers = "w320dp-h480dp")
+    fun addToDeckConfirmationStaysFullyVisibleAndUsesTheSelectedZone() {
+        val deck = DeckWithEntries(DeckEntity(id = 42, name = "Test deck", format = "Modern"), emptyList())
+        var added: Pair<Long, String>? = null
+        var dismissed = false
+        composeRule.setContent {
+            LatticeMtgTheme {
+                CardInspectorSheet(
+                    card = StarterCards.cards.first(),
+                    decks = listOf(deck),
+                    isOnline = false,
+                    showCardArt = false,
+                    onDismiss = { dismissed = true },
+                    onToggleBookmark = {},
+                    onAddToDeck = { deckId, zone -> added = deckId to zone }
+                )
+            }
+        }
+        composeRule.onNodeWithTag("sheet_open_deck_picker").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("Sideboard").performScrollTo().performClick()
+        val confirm = composeRule.onNodeWithTag("sheet_add_to_deck_button").assertIsDisplayed()
+        assertTrue(confirm.getBoundsInRoot() == confirm.getUnclippedBoundsInRoot())
+        composeRule.onNodeWithText("Add 1x to Sideboard").assertIsDisplayed()
+        confirm.performClick()
+        composeRule.runOnIdle {
+            assertTrue(added == (42L to DeckZones.SIDEBOARD))
+            assertTrue(dismissed)
+        }
+    }
+
 }

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,12 +36,12 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,7 +86,9 @@ import com.example.data.local.DeckZones
 import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+private enum class CardInspectorPage { DETAILS, RULINGS, ADD_TO_DECK }
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CardInspectorSheet(
     card: CardEntity,
@@ -106,10 +109,8 @@ fun CardInspectorSheet(
     val nextAction by rememberUpdatedState(onNext)
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val scrollState = remember(card.id) { ScrollState(0) }
-    var showingRulings by remember(card.id) { mutableStateOf(false) }
-    var selectedDeckId by remember(decks) { mutableStateOf(decks.firstOrNull()?.deck?.id) }
-    var selectedZone by remember { mutableStateOf(DeckZones.MAINBOARD) }
-    var deckMenuExpanded by remember { mutableStateOf(false) }
+    var page by remember(card.id) { mutableStateOf(CardInspectorPage.DETAILS) }
+    val backToDetails = { page = CardInspectorPage.DETAILS }
 
     val decodedFaces = remember(card.cardFacesJson) {
         CardJsonCodec.decodeFaces(card.cardFacesJson)
@@ -122,18 +123,31 @@ fun CardInspectorSheet(
         card.legalFormats.isBlank()
 
     Dialog(
-        onDismissRequest = { if (showingRulings) showingRulings = false else onDismiss() },
+        onDismissRequest = { if (page == CardInspectorPage.DETAILS) onDismiss() else backToDetails() },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false
         )
     ) {
-        if (showingRulings) {
+        if (page == CardInspectorPage.RULINGS) {
             CardRulings(
                 cardName = card.name,
                 rulings = effectiveRulings,
                 isLoading = isLoadingRulings,
-                onBack = { showingRulings = false }
+                onBack = backToDetails
+            )
+            return@Dialog
+        }
+
+        if (page == CardInspectorPage.ADD_TO_DECK) {
+            CardDeckPicker(
+                cardName = card.name,
+                decks = decks,
+                onBack = backToDetails,
+                onAdd = { deckId, zone ->
+                    onAddToDeck(deckId, zone)
+                    onDismiss()
+                }
             )
             return@Dialog
         }
@@ -225,10 +239,18 @@ fun CardInspectorSheet(
                 }
             }
             OutlinedButton(
-                onClick = { showingRulings = true },
+                onClick = { page = CardInspectorPage.RULINGS },
                 modifier = Modifier.fillMaxWidth().testTag("sheet_open_rulings")
             ) {
                 Text("Official Rulings (${effectiveRulings.size})")
+            }
+            if (decks.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = { page = CardInspectorPage.ADD_TO_DECK },
+                    modifier = Modifier.fillMaxWidth().testTag("sheet_open_deck_picker")
+                ) {
+                    Text("Add to Offline Deck")
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
             if (showCardArt) {
@@ -487,86 +509,6 @@ fun CardInspectorSheet(
                 }
             }
 
-            if (decks.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Add to Offline Deck",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                val selectedDeckName = decks.firstOrNull { it.deck.id == selectedDeckId }?.deck?.name ?: "Select Deck"
-                ExposedDropdownMenuBox(
-                    expanded = deckMenuExpanded,
-                    onExpandedChange = { deckMenuExpanded = !deckMenuExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = selectedDeckName,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Target Deck") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = deckMenuExpanded) },
-                        modifier = Modifier
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth()
-                            .testTag("sheet_deck_selector")
-                    )
-                    ExposedDropdownMenu(
-                        expanded = deckMenuExpanded,
-                        onDismissRequest = { deckMenuExpanded = false }
-                    ) {
-                        decks.forEach { d ->
-                            DropdownMenuItem(
-                                text = { Text("${d.deck.name} (${d.deck.format})") },
-                                onClick = {
-                                    selectedDeckId = d.deck.id
-                                    deckMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    listOf(DeckZones.MAINBOARD, DeckZones.SIDEBOARD, DeckZones.COMMANDER).forEach { z ->
-                        val active = selectedZone == z
-                        AssistChip(
-                            onClick = { selectedZone = z },
-                            label = {
-                                Text(
-                                    text = z.lowercase().replaceFirstChar { it.uppercase() },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        selectedDeckId?.let { id ->
-                            onAddToDeck(id, selectedZone)
-                            onDismiss()
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("sheet_add_to_deck_button")
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add 1x to ${selectedZone.lowercase().replaceFirstChar { it.uppercase() }}")
-                }
-            }
-
             if (card.isCustom && onDeleteCustomCard != null) {
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(
@@ -584,6 +526,106 @@ fun CardInspectorSheet(
                     Text("Delete Custom Card", color = MaterialTheme.colorScheme.error)
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun CardDeckPicker(
+    cardName: String,
+    decks: List<DeckWithEntries>,
+    onBack: () -> Unit,
+    onAdd: (Long, String) -> Unit
+) {
+    var selectedDeckId by remember { mutableStateOf(decks.firstOrNull()?.deck?.id) }
+    var selectedZone by remember { mutableStateOf(DeckZones.MAINBOARD) }
+    var deckMenuExpanded by remember { mutableStateOf(false) }
+    val selectedDeck = decks.firstOrNull { it.deck.id == selectedDeckId }?.deck
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .safeDrawingPadding()
+            .padding(horizontal = 20.dp)
+    ) {
+        Column(
+            modifier = Modifier.weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(top = 12.dp, bottom = 8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to card details")
+                }
+                Column {
+                    Text("Add to Offline Deck", style = MaterialTheme.typography.titleLarge)
+                    Text(cardName, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            val selectedDeckName = selectedDeck?.name ?: "Select Deck"
+            ExposedDropdownMenuBox(
+                expanded = deckMenuExpanded,
+                onExpandedChange = { deckMenuExpanded = !deckMenuExpanded }
+            ) {
+                OutlinedTextField(
+                    value = selectedDeckName,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Target Deck") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = deckMenuExpanded) },
+                    modifier = Modifier
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth()
+                        .testTag("sheet_deck_selector")
+                )
+                ExposedDropdownMenu(
+                    expanded = deckMenuExpanded,
+                    onDismissRequest = { deckMenuExpanded = false }
+                ) {
+                    decks.forEach { d ->
+                        DropdownMenuItem(
+                            text = { Text("${d.deck.name} (${d.deck.format})") },
+                            onClick = {
+                                selectedDeckId = d.deck.id
+                                deckMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                listOf(DeckZones.MAINBOARD, DeckZones.SIDEBOARD, DeckZones.COMMANDER).forEach { z ->
+                    val active = selectedZone == z
+                    FilterChip(
+                        selected = active,
+                        onClick = { selectedZone = z },
+                        label = {
+                            Text(
+                                text = z.lowercase().replaceFirstChar { it.uppercase() },
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
+        Button(
+            onClick = { selectedDeck?.let { onAdd(it.id, selectedZone) } },
+            enabled = selectedDeck != null,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                .testTag("sheet_add_to_deck_button")
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Add 1x to ${selectedZone.lowercase().replaceFirstChar { it.uppercase() }}")
         }
     }
 }
