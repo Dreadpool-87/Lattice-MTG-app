@@ -186,7 +186,7 @@ private fun OfflineArtworkDialog(
                         }
                     }
                     ArtworkScope.ALL -> Text(
-                        "One representative printing per card. This selection can require several GB.",
+                        "Images for the full catalog can take several GB. Check the estimated download size and available storage before starting.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     ArtworkScope.COLLECTION -> Unit
@@ -242,7 +242,9 @@ private fun OfflineArtworkDialog(
             when {
                 state.busy -> TextButton(onClick = { repository.stop() }) { Text("Stop") }
                 state.remaining > 0 -> TextButton(onClick = repository::download, enabled = !offlineOnly) {
-                    Text("Download images")
+                    Text(if (scope == ArtworkScope.ALL) {
+                        "Download · about ${Formatter.formatShortFileSize(context, state.estimatedBytes)}"
+                    } else "Download images")
                 }
                 else -> TextButton(
                     enabled = selection != null && !loadingOptions && !offlineOnly,
