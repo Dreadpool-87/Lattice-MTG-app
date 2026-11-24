@@ -44,6 +44,7 @@ internal fun OfflineCatalogSettings(repository: OfflineCatalogRepository, offlin
     var checking by remember { mutableStateOf(false) }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
     var showSets by rememberSaveable { mutableStateOf(false) }
+    var confirmFullCatalog by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
 
     fun download(pack: OfflineCatalogPack) {
@@ -103,7 +104,7 @@ internal fun OfflineCatalogSettings(repository: OfflineCatalogRepository, offlin
             val action = if (full.id in installed) "Update all cards" else "Download all cards"
             Button(
                 enabled = !offlineOnly && !checking && downloading == null && !current,
-                onClick = { download(full) }
+                onClick = { confirmFullCatalog = true }
             ) {
                 Text(if (current) "All cards downloaded" else "$action · ${Formatter.formatShortFileSize(context, full.bytes)}")
             }
@@ -116,6 +117,33 @@ internal fun OfflineCatalogSettings(repository: OfflineCatalogRepository, offlin
                 style = MaterialTheme.typography.bodySmall
             )
         }
+    }
+
+    val fullToConfirm = manifest?.packs?.firstOrNull()
+    if (confirmFullCatalog && fullToConfirm != null) {
+        val size = Formatter.formatShortFileSize(context, fullToConfirm.bytes)
+        val action = if (fullToConfirm.id in installed) "Update" else "Download"
+        AlertDialog(
+            onDismissRequest = { confirmFullCatalog = false },
+            title = { Text("$action all card data?") },
+            text = {
+                Text("This downloads $size of compressed card data for ${fullToConfirm.count} cards. " +
+                    "The installed catalog takes up more space. Card images are downloaded separately.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !offlineOnly && downloading == null &&
+                        installed[fullToConfirm.id] != fullToConfirm.sha256,
+                    onClick = {
+                        confirmFullCatalog = false
+                        download(fullToConfirm)
+                    }
+                ) { Text("$action · $size") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFullCatalog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showSets) {
