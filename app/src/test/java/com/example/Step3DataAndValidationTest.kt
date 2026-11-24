@@ -241,6 +241,7 @@ class Step3DataAndValidationTest {
                     card = mainCard,
                     decks = emptyList(),
                     isOnline = false,
+                    showCardArt = false,
                     onDismiss = {},
                     onToggleBookmark = {},
                     onAddToDeck = { _, _ -> },

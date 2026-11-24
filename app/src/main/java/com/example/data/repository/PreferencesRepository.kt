@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.ui.theme.ThemeBrightnessMode
 import com.example.ui.theme.WubrgTheme
@@ -14,6 +15,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.latticeDataStore: DataStore<Preferences> by preferencesDataStore(name = "lattice_prefs")
+
+data class Appearance(val theme: WubrgTheme, val brightness: ThemeBrightnessMode)
 
 class PreferencesRepository(private val context: Context) {
     private object Keys {
@@ -38,13 +41,16 @@ class PreferencesRepository(private val context: Context) {
         prefs[Keys.PLAYER_COUNT] ?: 2
     }
 
-    val wubrgTheme: Flow<WubrgTheme> = context.latticeDataStore.data.map { prefs ->
-        WubrgTheme.fromStorageKey(prefs[Keys.WUBRG_THEME])
+    val appearance: Flow<Appearance> = context.latticeDataStore.data.map { prefs ->
+        Appearance(
+            WubrgTheme.fromStorageKey(prefs[Keys.WUBRG_THEME]),
+            ThemeBrightnessMode.fromStorageKey(prefs[Keys.THEME_BRIGHTNESS])
+        )
     }
 
-    val themeBrightnessMode: Flow<ThemeBrightnessMode> = context.latticeDataStore.data.map { prefs ->
-        ThemeBrightnessMode.fromStorageKey(prefs[Keys.THEME_BRIGHTNESS])
-    }
+    val wubrgTheme: Flow<WubrgTheme> = appearance.map { it.theme }
+    val themeBrightnessMode: Flow<ThemeBrightnessMode> =
+        appearance.map { it.brightness }
 
     val showCardArt: Flow<Boolean> = context.latticeDataStore.data.map { prefs ->
         prefs[Keys.SHOW_CARD_ART] ?: true
@@ -81,7 +87,24 @@ class PreferencesRepository(private val context: Context) {
         context.latticeDataStore.edit { it[Keys.KEEP_SCREEN_AWAKE] = enabled }
     }
 
+    private val catalogPackKey = stringSetPreferencesKey("offline_catalog_packs")
+
+    val catalogPacks: Flow<Map<String, String>> = context.latticeDataStore.data.map { prefs ->
+        prefs[catalogPackKey].orEmpty().associate { it.substringBefore('=') to it.substringAfter('=') }
+    }
+
+    suspend fun recordCatalogPack(id: String, sha256: String) {
+        context.latticeDataStore.edit { prefs ->
+            prefs[catalogPackKey] = prefs[catalogPackKey].orEmpty()
+                .filterNot { it.substringBefore('=') == id }.toSet() + "$id=$sha256"
+        }
+    }
+
     suspend fun resetAllPreferences() {
-        context.latticeDataStore.edit { it.clear() }
+        context.latticeDataStore.edit { prefs ->
+            val packs = prefs[catalogPackKey]
+            prefs.clear()
+            if (packs != null) prefs[catalogPackKey] = packs
+        }
     }
 }

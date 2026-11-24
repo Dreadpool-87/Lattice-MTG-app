@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CardDao {
+    @Query("UPDATE cards SET imageUri = :uri WHERE id = :cardId")
+    suspend fun updateArtwork(cardId: String, uri: String)
+
     @Query("SELECT * FROM cards ORDER BY isBookmarked DESC, name ASC")
     fun observeAllCards(): Flow<List<CardEntity>>
 
@@ -111,6 +114,25 @@ interface CardDao {
     @Transaction
     suspend fun upsertAllPreservingState(cards: List<CardEntity>): List<CardEntity> {
         return cards.map { upsertPreservingState(it) }
+    }
+
+    @Query("SELECT * FROM cards WHERE scryfallId = :id LIMIT 1")
+    suspend fun findByCanonicalScryfallId(id: String): CardEntity?
+
+    suspend fun storeCatalogPrinting(card: CardEntity) {
+        val existing = getCardById(card.id) ?: findByCanonicalScryfallId(card.scryfallId)
+        if (existing == null) {
+            insertIgnore(card)
+        } else {
+            updateCardInPlace(card.copy(
+                id = existing.id,
+                rarity = existing.rarity.takeUnless { it == "unknown" } ?: card.rarity,
+                isBookmarked = existing.isBookmarked,
+                imageUri = existing.imageUri,
+                rulingsJson = existing.rulingsJson,
+                cardFacesJson = existing.cardFacesJson.ifBlank { card.cardFacesJson }
+            ))
+        }
     }
 
     @Query("UPDATE cards SET isBookmarked = :bookmarked WHERE id = :cardId")

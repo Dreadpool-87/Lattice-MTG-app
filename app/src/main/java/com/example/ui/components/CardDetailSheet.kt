@@ -52,10 +52,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckWithEntries
@@ -69,6 +72,7 @@ fun CardInspectorSheet(
     card: CardEntity,
     decks: List<DeckWithEntries>,
     isOnline: Boolean,
+    showCardArt: Boolean,
     onDismiss: () -> Unit,
     onToggleBookmark: () -> Unit,
     onAddToDeck: (deckId: Long, zone: String) -> Unit,
@@ -157,14 +161,24 @@ fun CardInspectorSheet(
             val identityList = card.colorIdentity.split(",").map { it.trim() }.filter { it.isNotEmpty() }
             val accentColor = manaColorsForSymbol(identityList.firstOrNull() ?: "C").first
 
-            if (!card.imageUri.isNullOrBlank() && isOnline) {
+            val imageUri = (card.imageUri ?: decodedFaces.firstOrNull()?.imageUri)
+                ?.takeIf { it.startsWith("https://") }
+            if (showCardArt && imageUri != null) {
+                val context = LocalContext.current
+                val request = remember(context, imageUri, isOnline) {
+                    ImageRequest.Builder(context)
+                        .data(imageUri)
+                        .networkCachePolicy(if (isOnline) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                        .build()
+                }
                 AsyncImage(
-                    model = card.imageUri,
+                    model = request,
                     contentDescription = card.name,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(240.dp)
+                        .testTag("sheet_card_art")
                         .clip(RoundedCornerShape(14.dp))
                 )
                 Spacer(modifier = Modifier.height(12.dp))

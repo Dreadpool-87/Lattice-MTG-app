@@ -53,3 +53,7 @@ For each stable GitHub release, attach the signed APK as `lattice-android.apk` a
 Lattice MTG is an unofficial Magic: The Gathering fan project. Wizards of the Coast has not approved, endorsed, or sponsored it. Portions of the materials used belong to Wizards of the Coast. © Wizards of the Coast LLC. See the [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy).
 
 This Android repository currently has no project-wide code license. Third-party components retain their respective licenses.
+
+### Offline card data
+
+Open **Vault → Browse catalog** for local catalog search and filters. The Vault itself opens your saved collections. In **Settings → Offline card data**, check for the current Lattice snapshot and download all cards or a single set. The full pack includes one representative printing per card; set packs include one language per collector-number and card combination. A download includes card text, faces and legality. Card images and metadata outside the published snapshot can still be fetched online. Downloaded card data does not change collection quantities or deck contents. After the website publishes a newer snapshot, Vault shows an in-app notice when an installed pack changed.

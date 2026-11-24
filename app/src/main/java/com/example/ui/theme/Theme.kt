@@ -8,6 +8,8 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
@@ -22,8 +24,8 @@ enum class WubrgTheme(
         storageKey = "WHITE",
         manaCode = "W",
         displayName = "Plains Ivory",
-        subtitle = "Radiant Gold & Alabaster",
-        swatchHex = Color(0xFFF2D27A)
+        subtitle = "White and neutral gray",
+        swatchHex = Color(0xFFF2F2F2)
     ),
     BLUE(
         storageKey = "BLUE",
@@ -36,15 +38,15 @@ enum class WubrgTheme(
         storageKey = "BLACK",
         manaCode = "B",
         displayName = "Swamp Mire",
-        subtitle = "Midnight Umber & Amethyst",
-        swatchHex = Color(0xFFC084FC)
+        subtitle = "Black and charcoal",
+        swatchHex = Color(0xFF272727)
     ),
     RED(
         storageKey = "RED",
         manaCode = "R",
         displayName = "Mountain Forge",
-        subtitle = "Basalt Ember & Molten Copper",
-        swatchHex = Color(0xFFFF785A)
+        subtitle = "Crimson red",
+        swatchHex = Color(0xFFFF5258)
     ),
     GREEN(
         storageKey = "GREEN",
@@ -52,6 +54,13 @@ enum class WubrgTheme(
         displayName = "Forest Spark",
         subtitle = "Lattice Obsidian & Mint Spark",
         swatchHex = LatticeSparkGreen
+    ),
+    WUBRG(
+        storageKey = "WUBRG",
+        manaCode = "WUBRG",
+        displayName = "WUBRG",
+        subtitle = "All five mana colors",
+        swatchHex = Color(0xFF63CBFF)
     );
 
     companion object {
@@ -64,7 +73,8 @@ enum class WubrgTheme(
 enum class ThemeBrightnessMode(val storageKey: String, val label: String) {
     SYSTEM("SYSTEM", "System"),
     DARK("DARK", "Dark"),
-    LIGHT("LIGHT", "Light");
+    LIGHT("LIGHT", "Light"),
+    OLED("OLED", "OLED");
 
     companion object {
         fun fromStorageKey(key: String?): ThemeBrightnessMode {
@@ -75,28 +85,28 @@ enum class ThemeBrightnessMode(val storageKey: String, val label: String) {
 
 // === 1. WHITE (Plains / Radiant Dawn) ===
 private val WhiteDarkColorScheme = darkColorScheme(
-    primary = Color(0xFFF2D27A),
-    onPrimary = Color(0xFF3E2D05),
-    primaryContainer = Color(0xFF473712),
-    onPrimaryContainer = Color(0xFFFFE59E),
-    secondary = Color(0xFFDCD3BA),
-    onSecondary = Color(0xFF2D281E),
-    secondaryContainer = Color(0xFF332E22),
-    onSecondaryContainer = Color(0xFFEDE4CD),
+    primary = Color(0xFFF2F2F2),
+    onPrimary = Color(0xFF202020),
+    primaryContainer = Color(0xFF383838),
+    onPrimaryContainer = Color(0xFFFAFAFA),
+    secondary = Color(0xFFD4D4D4),
+    onSecondary = Color(0xFF242424),
+    secondaryContainer = Color(0xFF323232),
+    onSecondaryContainer = Color(0xFFEEEEEE),
     tertiary = ManaWhiteBg,
     onTertiary = ManaWhiteFg,
-    background = Color(0xFF161208),
-    onBackground = Color(0xFFF7F2E4),
-    surface = Color(0xFF211C12),
-    onSurface = Color(0xFFF7F2E4),
-    surfaceVariant = Color(0xFF2D2618),
-    onSurfaceVariant = Color(0xFFB5AD99),
-    surfaceContainerLow = Color(0xFF211C12),
-    surfaceContainer = Color(0xFF292215),
-    surfaceContainerHigh = Color(0xFF362C1B),
-    surfaceContainerHighest = Color(0xFF453821),
-    outline = Color(0xFF655334),
-    outlineVariant = Color(0xFF413522),
+    background = Color(0xFF141414),
+    onBackground = Color(0xFFF6F6F6),
+    surface = Color(0xFF1E1E1E),
+    onSurface = Color(0xFFF6F6F6),
+    surfaceVariant = Color(0xFF2D2D2D),
+    onSurfaceVariant = Color(0xFFC4C4C4),
+    surfaceContainerLow = Color(0xFF1A1A1A),
+    surfaceContainer = Color(0xFF262626),
+    surfaceContainerHigh = Color(0xFF303030),
+    surfaceContainerHighest = Color(0xFF3B3B3B),
+    outline = Color(0xFF7A7A7A),
+    outlineVariant = Color(0xFF404040),
     error = CrimsonEmber,
     onError = Color.White,
     errorContainer = CrimsonContainer,
@@ -104,28 +114,28 @@ private val WhiteDarkColorScheme = darkColorScheme(
 )
 
 private val WhiteLightColorScheme = lightColorScheme(
-    primary = Color(0xFF8C6214),
+    primary = Color(0xFF373737),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFF7E5BC),
-    onPrimaryContainer = Color(0xFF543906),
-    secondary = Color(0xFF576475),
+    primaryContainer = Color(0xFFE4E4E4),
+    onPrimaryContainer = Color(0xFF222222),
+    secondary = Color(0xFF555555),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE0E7F0),
-    onSecondaryContainer = Color(0xFF303B4A),
+    secondaryContainer = Color(0xFFE9E9E9),
+    onSecondaryContainer = Color(0xFF333333),
     tertiary = ManaWhiteBg,
     onTertiary = ManaWhiteFg,
-    background = Color(0xFFFCF3DB),
-    onBackground = Color(0xFF1F1B14),
-    surface = Color(0xFFFFF9EB),
-    onSurface = Color(0xFF1F1B14),
-    surfaceVariant = Color(0xFFF5E6C1),
-    onSurfaceVariant = Color(0xFF625B4C),
-    surfaceContainerLow = Color(0xFFFFF9EB),
-    surfaceContainer = Color(0xFFF5E7C6),
-    surfaceContainerHigh = Color(0xFFECDDB4),
-    surfaceContainerHighest = Color(0xFFE2CFA0),
-    outline = Color(0xFFAE9870),
-    outlineVariant = Color(0xFFDFCDA5),
+    background = Color(0xFFFAFAFA),
+    onBackground = Color(0xFF202020),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF202020),
+    surfaceVariant = Color(0xFFECECEC),
+    onSurfaceVariant = Color(0xFF535353),
+    surfaceContainerLow = Color(0xFFFFFFFF),
+    surfaceContainer = Color(0xFFF3F3F3),
+    surfaceContainerHigh = Color(0xFFEDEDED),
+    surfaceContainerHighest = Color(0xFFE5E5E5),
+    outline = Color(0xFF747474),
+    outlineVariant = Color(0xFFD0D0D0),
     error = Color(0xFFB3261E),
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
@@ -193,28 +203,28 @@ private val BlueLightColorScheme = lightColorScheme(
 
 // === 3. BLACK (Swamp / Phyrexian Mire) ===
 private val BlackDarkColorScheme = darkColorScheme(
-    primary = Color(0xFFC084FC),
-    onPrimary = Color(0xFF2F0F4D),
-    primaryContainer = Color(0xFF391D54),
-    onPrimaryContainer = Color(0xFFE9D5FF),
-    secondary = Color(0xFFD4C8E8),
-    onSecondary = Color(0xFF272133),
-    secondaryContainer = Color(0xFF2D253B),
-    onSecondaryContainer = Color(0xFFEAE2F8),
+    primary = Color(0xFFD7D7D7),
+    onPrimary = Color(0xFF151515),
+    primaryContainer = Color(0xFF383838),
+    onPrimaryContainer = Color(0xFFEFEFEF),
+    secondary = Color(0xFFBEBEBE),
+    onSecondary = Color(0xFF252525),
+    secondaryContainer = Color(0xFF303030),
+    onSecondaryContainer = Color(0xFFEBEBEB),
     tertiary = ManaBlackBg,
     onTertiary = ManaBlackFg,
-    background = Color(0xFF100B12),
-    onBackground = Color(0xFFF2ECF8),
-    surface = Color(0xFF1E1222),
-    onSurface = Color(0xFFF2ECF8),
-    surfaceVariant = Color(0xFF2D1B31),
-    onSurfaceVariant = Color(0xFFA79BB8),
-    surfaceContainerLow = Color(0xFF1E1222),
-    surfaceContainer = Color(0xFF29182E),
-    surfaceContainerHigh = Color(0xFF35213C),
-    surfaceContainerHighest = Color(0xFF442A4B),
-    outline = Color(0xFF634568),
-    outlineVariant = Color(0xFF402944),
+    background = Color(0xFF0B0B0B),
+    onBackground = Color(0xFFEAEAEA),
+    surface = Color(0xFF151515),
+    onSurface = Color(0xFFEAEAEA),
+    surfaceVariant = Color(0xFF242424),
+    onSurfaceVariant = Color(0xFFBCBCBC),
+    surfaceContainerLow = Color(0xFF121212),
+    surfaceContainer = Color(0xFF1D1D1D),
+    surfaceContainerHigh = Color(0xFF262626),
+    surfaceContainerHighest = Color(0xFF313131),
+    outline = Color(0xFF707070),
+    outlineVariant = Color(0xFF3D3D3D),
     error = CrimsonEmber,
     onError = Color.White,
     errorContainer = CrimsonContainer,
@@ -222,28 +232,28 @@ private val BlackDarkColorScheme = darkColorScheme(
 )
 
 private val BlackLightColorScheme = lightColorScheme(
-    primary = Color(0xFF6D28D9),
+    primary = Color(0xFF262626),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEDE0FF),
-    onPrimaryContainer = Color(0xFF3B0D82),
-    secondary = Color(0xFF4F4663),
+    primaryContainer = Color(0xFFDEDEDE),
+    onPrimaryContainer = Color(0xFF111111),
+    secondary = Color(0xFF505050),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE7E2F2),
-    onSecondaryContainer = Color(0xFF2E273D),
+    secondaryContainer = Color(0xFFE2E2E2),
+    onSecondaryContainer = Color(0xFF2A2A2A),
     tertiary = ManaBlackBg,
     onTertiary = ManaBlackFg,
-    background = Color(0xFFF2E8F9),
-    onBackground = Color(0xFF1B1624),
-    surface = Color(0xFFFCF6FF),
-    onSurface = Color(0xFF1B1624),
-    surfaceVariant = Color(0xFFEBDCF2),
-    onSurfaceVariant = Color(0xFF5D536E),
-    surfaceContainerLow = Color(0xFFFCF6FF),
-    surfaceContainer = Color(0xFFEDE0F4),
-    surfaceContainerHigh = Color(0xFFE4D3EE),
-    surfaceContainerHighest = Color(0xFFD9C4E7),
-    outline = Color(0xFFAE94B8),
-    outlineVariant = Color(0xFFD4C0E1),
+    background = Color(0xFFEEEEEE),
+    onBackground = Color(0xFF181818),
+    surface = Color(0xFFFAFAFA),
+    onSurface = Color(0xFF181818),
+    surfaceVariant = Color(0xFFE0E0E0),
+    onSurfaceVariant = Color(0xFF4E4E4E),
+    surfaceContainerLow = Color(0xFFF6F6F6),
+    surfaceContainer = Color(0xFFE9E9E9),
+    surfaceContainerHigh = Color(0xFFE1E1E1),
+    surfaceContainerHighest = Color(0xFFD8D8D8),
+    outline = Color(0xFF737373),
+    outlineVariant = Color(0xFFC6C6C6),
     error = Color(0xFFB3261E),
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
@@ -252,28 +262,28 @@ private val BlackLightColorScheme = lightColorScheme(
 
 // === 4. RED (Mountain / Dragonfire Forge) ===
 private val RedDarkColorScheme = darkColorScheme(
-    primary = Color(0xFFFF785A),
-    onPrimary = Color(0xFF471105),
-    primaryContainer = Color(0xFF541B0F),
-    onPrimaryContainer = Color(0xFFFFD6CC),
-    secondary = Color(0xFFF5B841),
-    onSecondary = Color(0xFF3D2903),
-    secondaryContainer = Color(0xFF45310B),
-    onSecondaryContainer = Color(0xFFFFE5AE),
+    primary = Color(0xFFFF696F),
+    onPrimary = Color(0xFF410008),
+    primaryContainer = Color(0xFF731521),
+    onPrimaryContainer = Color(0xFFFFD9DC),
+    secondary = Color(0xFFFF9AA0),
+    onSecondary = Color(0xFF480910),
+    secondaryContainer = Color(0xFF532026),
+    onSecondaryContainer = Color(0xFFFFD9DC),
     tertiary = ManaRedBg,
     onTertiary = ManaRedFg,
-    background = Color(0xFF140D0C),
-    onBackground = Color(0xFFFAEEEB),
-    surface = Color(0xFF1F1412),
-    onSurface = Color(0xFFFAEEEB),
-    surfaceVariant = Color(0xFF2C1D1A),
-    onSurfaceVariant = Color(0xFFBDA19B),
-    surfaceContainerLow = Color(0xFF1F1412),
-    surfaceContainer = Color(0xFF281B18),
-    surfaceContainerHigh = Color(0xFF342420),
-    surfaceContainerHighest = Color(0xFF402C27),
-    outline = Color(0xFF593D37),
-    outlineVariant = Color(0xFF3D2925),
+    background = Color(0xFF1B0D10),
+    onBackground = Color(0xFFFFF0F1),
+    surface = Color(0xFF281217),
+    onSurface = Color(0xFFFFF0F1),
+    surfaceVariant = Color(0xFF3A1D23),
+    onSurfaceVariant = Color(0xFFE0B5BA),
+    surfaceContainerLow = Color(0xFF241015),
+    surfaceContainer = Color(0xFF34171D),
+    surfaceContainerHigh = Color(0xFF431C25),
+    surfaceContainerHighest = Color(0xFF52232D),
+    outline = Color(0xFF97616A),
+    outlineVariant = Color(0xFF56313A),
     error = Color(0xFFFF8A80),
     onError = Color(0xFF450A0A),
     errorContainer = Color(0xFF5C1919),
@@ -281,28 +291,28 @@ private val RedDarkColorScheme = darkColorScheme(
 )
 
 private val RedLightColorScheme = lightColorScheme(
-    primary = Color(0xFFB93822),
+    primary = Color(0xFFAA1830),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDDD6),
-    onPrimaryContainer = Color(0xFF63170A),
-    secondary = Color(0xFFB45309),
+    primaryContainer = Color(0xFFFFDADF),
+    onPrimaryContainer = Color(0xFF55000F),
+    secondary = Color(0xFF9E3345),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFEF0D1),
-    onSecondaryContainer = Color(0xFF662E03),
+    secondaryContainer = Color(0xFFFFDFE3),
+    onSecondaryContainer = Color(0xFF521D29),
     tertiary = ManaRedBg,
     onTertiary = ManaRedFg,
-    background = Color(0xFFFCEBE4),
-    onBackground = Color(0xFF241614),
-    surface = Color(0xFFFFF7F3),
-    onSurface = Color(0xFF241614),
-    surfaceVariant = Color(0xFFF8DFD4),
-    onSurfaceVariant = Color(0xFF6E534C),
-    surfaceContainerLow = Color(0xFFFFF7F3),
-    surfaceContainer = Color(0xFFF8E1D8),
-    surfaceContainerHigh = Color(0xFFF3D7CA),
-    surfaceContainerHighest = Color(0xFFEDCABC),
-    outline = Color(0xFFBE9888),
-    outlineVariant = Color(0xFFE9CBBD),
+    background = Color(0xFFFFF3F4),
+    onBackground = Color(0xFF2B161B),
+    surface = Color(0xFFFFFAFA),
+    onSurface = Color(0xFF2B161B),
+    surfaceVariant = Color(0xFFF8E3E6),
+    onSurfaceVariant = Color(0xFF6F4F56),
+    surfaceContainerLow = Color(0xFFFFFAFA),
+    surfaceContainer = Color(0xFFFCE8EB),
+    surfaceContainerHigh = Color(0xFFF6DCE0),
+    surfaceContainerHighest = Color(0xFFF1D1D7),
+    outline = Color(0xFF9F737C),
+    outlineVariant = Color(0xFFE4BFC7),
     error = Color(0xFFB3261E),
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
@@ -368,6 +378,55 @@ private val GreenLightColorScheme = lightColorScheme(
     onErrorContainer = Color(0xFF410E0B)
 )
 
+val LocalWubrgTheme = staticCompositionLocalOf { WubrgTheme.GREEN }
+
+val WubrgSwatchColors = listOf(
+    Color(0xFFF7F3E8), Color(0xFF63CBFF), Color(0xFF242424),
+    Color(0xFFFF696F), Color(0xFF57EFAA)
+)
+
+private val WubrgDarkColorScheme = BlackDarkColorScheme.copy(
+    primary = WubrgSwatchColors[1],
+    onPrimary = Color(0xFF082630),
+    primaryContainer = Color(0xFF123B52),
+    onPrimaryContainer = Color(0xFFC1EBFF),
+    secondary = WubrgSwatchColors[4],
+    onSecondary = Color(0xFF092D20),
+    secondaryContainer = Color(0xFF174533),
+    onSecondaryContainer = Color(0xFFC2F9DC),
+    tertiary = WubrgSwatchColors[3],
+    onTertiary = Color(0xFF450B13),
+    tertiaryContainer = Color(0xFF592127),
+    onTertiaryContainer = Color(0xFFFFDADD)
+)
+
+private val WubrgLightColorScheme = WhiteLightColorScheme.copy(
+    primary = Color(0xFF126186),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD7F0FF),
+    onPrimaryContainer = Color(0xFF123748),
+    secondary = Color(0xFF136747),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFCEF4E1),
+    onSecondaryContainer = Color(0xFF103B2A),
+    tertiary = Color(0xFFAA273D),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFFFDBDF),
+    onTertiaryContainer = Color(0xFF5B1322)
+)
+
+fun ColorScheme.withOledSurfaces() = copy(
+    background = Color.Black,
+    surface = Color.Black,
+    surfaceBright = Color(0xFF131313),
+    surfaceDim = Color.Black,
+    surfaceContainerLowest = Color.Black,
+    surfaceContainerLow = Color(0xFF0B0B0B),
+    surfaceContainer = Color(0xFF101010),
+    surfaceContainerHigh = Color(0xFF181818),
+    surfaceContainerHighest = Color(0xFF202020)
+)
+
 fun colorSchemeForWubrg(wubrgTheme: WubrgTheme, isDark: Boolean): ColorScheme {
     return when (wubrgTheme) {
         WubrgTheme.WHITE -> if (isDark) WhiteDarkColorScheme else WhiteLightColorScheme
@@ -375,6 +434,7 @@ fun colorSchemeForWubrg(wubrgTheme: WubrgTheme, isDark: Boolean): ColorScheme {
         WubrgTheme.BLACK -> if (isDark) BlackDarkColorScheme else BlackLightColorScheme
         WubrgTheme.RED -> if (isDark) RedDarkColorScheme else RedLightColorScheme
         WubrgTheme.GREEN -> if (isDark) GreenDarkColorScheme else GreenLightColorScheme
+        WubrgTheme.WUBRG -> if (isDark) WubrgDarkColorScheme else WubrgLightColorScheme
     }
 }
 
@@ -395,14 +455,17 @@ fun LatticeMtgTheme(
     val systemDark = isSystemInDarkTheme()
     val useDark = when (brightnessMode) {
         ThemeBrightnessMode.SYSTEM -> systemDark
-        ThemeBrightnessMode.DARK -> true
+        ThemeBrightnessMode.DARK, ThemeBrightnessMode.OLED -> true
         ThemeBrightnessMode.LIGHT -> false
     }
-    val colorScheme = colorSchemeForWubrg(wubrgTheme = wubrgTheme, isDark = useDark)
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = LatticeTypography,
-        shapes = LatticeShapes,
-        content = content
-    )
+    val palette = colorSchemeForWubrg(wubrgTheme = wubrgTheme, isDark = useDark)
+    val colorScheme = if (brightnessMode == ThemeBrightnessMode.OLED) palette.withOledSurfaces() else palette
+    CompositionLocalProvider(LocalWubrgTheme provides wubrgTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = LatticeTypography,
+            shapes = LatticeShapes,
+            content = content
+        )
+    }
 }

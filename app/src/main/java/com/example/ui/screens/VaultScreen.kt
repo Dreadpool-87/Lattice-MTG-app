@@ -21,13 +21,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,7 +60,6 @@ import com.example.R
 import com.example.data.local.CardEntity
 import com.example.ui.components.CardInspectorSheet
 import com.example.ui.components.ManaSymbolPip
-import com.example.ui.components.VaultStatusBadge
 import com.example.ui.viewmodel.VaultViewModel
 
 private val cardTypeFilters = listOf("All", "Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land")
@@ -70,13 +70,15 @@ fun VaultScreen(
     viewModel: VaultViewModel,
     snackbarHostState: SnackbarHostState,
     onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenCatalog: () -> Unit = {},
+    onBackFromCatalog: (() -> Unit)? = null,
+    newerCardData: Boolean = false
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val collections by viewModel.collections.collectAsStateWithLifecycle()
-    var collectionView by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    val showCollections = collectionView ?: collections.isNotEmpty()
-    val inspectionExtras by viewModel.inspectionExtras.collectAsStateWithLifecycle()
+    val showCollections = onBackFromCatalog == null
+    var filtersExpanded by rememberSaveable { mutableStateOf(false) }
     var inspectedCard by remember { mutableStateOf<CardEntity?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
@@ -87,10 +89,6 @@ fun VaultScreen(
             snackbarHostState.showSnackbar(msg)
             viewModel.clearStatusBanner()
         }
-    }
-
-    LaunchedEffect(inspectedCard?.id) {
-        inspectedCard?.let { viewModel.loadCardInspectionExtras(it) }
     }
 
     Box(
@@ -116,54 +114,38 @@ fun VaultScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Card Vault",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = if (showCollections) "${collections.size} saved collections"
-                                else "${uiState.cards.size} of ${uiState.totalVaultCount} cards in local cache",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            VaultStatusBadge(
-                                isOnline = uiState.isOnline,
-                                offlineOnlyMode = uiState.offlineOnlyMode,
-                                cachedCardCount = uiState.totalVaultCount
-                            )
-                            IconButton(
-                                onClick = onOpenSettings,
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("open_settings_button_vault")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Settings,
-                                    contentDescription = stringResource(R.string.action_open_settings),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        onBackFromCatalog?.let {
+                            IconButton(onClick = it) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to collections")
                             }
+                        }
+                        Text(
+                            text = if (showCollections) "My collection" else "Card catalog",
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.testTag("open_settings_button_vault")
+                        ) {
+                            Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.action_open_settings))
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = showCollections, onClick = { collectionView = true },
-                            label = { Text("Collections") })
-                        FilterChip(selected = !showCollections, onClick = { collectionView = false },
-                            label = { Text("Catalog") })
-                        if (showCollections) {
+                    if (showCollections) {
+                        if (newerCardData) {
+                            TextButton(onClick = onOpenSettings) {
+                                Text("New card data available")
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = { showCsvImportDialog = true },
                                 modifier = Modifier.testTag("open_csv_import_button")
                             ) { Text("Import CSV") }
+                            OutlinedButton(onClick = onOpenCatalog) { Text("Browse catalog") }
                         }
-                    }
-
-                    if (!showCollections) {
+                    } else {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -172,7 +154,7 @@ fun VaultScreen(
                             OutlinedTextField(
                                 value = uiState.query,
                                 onValueChange = viewModel::setQuery,
-                                placeholder = { Text("Search name, set, #no, text...") },
+                                placeholder = { Text("Search catalog") },
                                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search vault") },
                                 trailingIcon = {
                                     if (uiState.query.isNotEmpty()) {
@@ -187,18 +169,6 @@ fun VaultScreen(
                                     .weight(1f)
                                     .testTag("vault_search_input")
                             )
-
-                            OutlinedButton(
-                                onClick = { showCsvImportDialog = true },
-                                contentPadding = PaddingValues(horizontal = 10.dp),
-                                modifier = Modifier
-                                    .height(52.dp)
-                                    .testTag("open_csv_import_button")
-                            ) {
-                                Icon(Icons.Filled.UploadFile, contentDescription = "Import CSV", modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("CSV", style = MaterialTheme.typography.labelLarge)
-                            }
 
                             OutlinedButton(
                                 onClick = { viewModel.syncFromScryfall() },
@@ -221,82 +191,102 @@ fun VaultScreen(
                             }
                         }
 
-                        Text(
-                            text = "Search covers local Room cache only (${uiState.totalVaultCount} cached cards) — not the full MTG catalog. Tap Sync to query Scryfall when online.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("vault_local_cache_notice")
-                        )
-
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            colorFilters.forEach { code ->
-                                val selected = code in uiState.selectedColors
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(
-                                        1.5.dp,
-                                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                                    ),
-                                    modifier = Modifier
-                                        .minimumInteractiveComponentSize()
-                                        .clickable { viewModel.toggleColor(code) }
-                                        .testTag("color_filter_$code")
-                                ) {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        ManaSymbolPip(symbol = code, size = 20.dp)
-                                    }
-                                }
-                            }
-
-                            FilterChip(
-                                selected = uiState.bookmarkedOnly,
-                                onClick = viewModel::toggleBookmarkedOnly,
-                                leadingIcon = {
-                                    Icon(
-                                        if (uiState.bookmarkedOnly) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = { Text("Saved") },
-                                modifier = Modifier.testTag("filter_bookmarked_chip")
+                            Text(
+                                text = "${uiState.cards.size} of ${uiState.totalVaultCount} local cards",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("vault_local_cache_notice")
                             )
-
+                            val active = uiState.selectedColors.size + listOf(
+                                uiState.selectedType != "All", uiState.selectedRarity != "All",
+                                uiState.bookmarkedOnly, uiState.maxCmcFilter != null
+                            ).count { it }
                             FilterChip(
-                                selected = uiState.maxCmcFilter == 2,
-                                onClick = { viewModel.setMaxCmc(if (uiState.maxCmcFilter == 2) null else 2) },
-                                label = { Text("CMC ≤ 2") },
-                                modifier = Modifier.testTag("filter_cmc2_chip")
+                                selected = filtersExpanded,
+                                onClick = { filtersExpanded = !filtersExpanded },
+                                label = { Text(if (active == 0) "Filters" else "Filters ($active)") },
+                                modifier = Modifier.testTag("vault_catalog_filters")
                             )
                         }
+                        if (filtersExpanded) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                            ) {
+                                colorFilters.forEach { code ->
+                                    val selected = code in uiState.selectedColors
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(
+                                            1.5.dp,
+                                            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                        ),
+                                        modifier = Modifier
+                                            .minimumInteractiveComponentSize()
+                                            .clickable { viewModel.toggleColor(code) }
+                                            .testTag("color_filter_$code")
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            ManaSymbolPip(symbol = code, size = 20.dp)
+                                        }
+                                    }
+                                }
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                        ) {
-                            cardTypeFilters.forEach { type ->
                                 FilterChip(
-                                    selected = uiState.selectedType == type,
-                                    onClick = { viewModel.setTypeFilter(type) },
-                                    label = { Text(type) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                        selectedLabelColor = MaterialTheme.colorScheme.secondary
-                                    ),
-                                    modifier = Modifier.testTag("type_filter_${type.lowercase()}")
+                                    selected = uiState.bookmarkedOnly,
+                                    onClick = viewModel::toggleBookmarkedOnly,
+                                    leadingIcon = {
+                                        Icon(
+                                            if (uiState.bookmarkedOnly) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    label = { Text("Saved") },
+                                    modifier = Modifier.testTag("filter_bookmarked_chip")
                                 )
+
+                                FilterChip(
+                                    selected = uiState.maxCmcFilter == 2,
+                                    onClick = { viewModel.setMaxCmc(if (uiState.maxCmcFilter == 2) null else 2) },
+                                    label = { Text("CMC ≤ 2") },
+                                    modifier = Modifier.testTag("filter_cmc2_chip")
+                                )
+                            }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                            ) {
+                                cardTypeFilters.forEach { type ->
+                                    FilterChip(
+                                        selected = uiState.selectedType == type,
+                                        onClick = { viewModel.setTypeFilter(type) },
+                                        label = { Text(type) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                            selectedLabelColor = MaterialTheme.colorScheme.secondary
+                                        ),
+                                        modifier = Modifier.testTag("type_filter_${type.lowercase()}")
+                                    )
+                                }
+                            }
+                            OutlinedButton(onClick = viewModel::clearFilters) {
+                                Text("Reset filters")
                             }
                         }
                     }
@@ -314,13 +304,13 @@ fun VaultScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "No matching cards in offline Room vault",
+                            text = "No matching cards",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Clear filters, import a Delver Lens CSV, create a custom card, or tap Sync when online.",
+                            text = "Clear filters, search Scryfall with Sync, or download card data from Settings.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -332,8 +322,8 @@ fun VaultScreen(
                 }
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 88.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 80.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(uiState.cards, key = { it.id }) { card ->
@@ -363,22 +353,7 @@ fun VaultScreen(
     }
 
     inspectedCard?.let { card ->
-        val liveCard = uiState.cards.firstOrNull { it.id == card.id } ?: card
-        val extrasForCard = if (inspectionExtras.cardId == liveCard.id) inspectionExtras else null
-        CardInspectorSheet(
-            card = liveCard,
-            decks = uiState.decks,
-            isOnline = uiState.isOnline && !uiState.offlineOnlyMode && uiState.showCardArt,
-            onDismiss = { inspectedCard = null },
-            onToggleBookmark = { viewModel.toggleBookmark(liveCard) },
-            onAddToDeck = { deckId, zone -> viewModel.addCardToDeck(deckId, liveCard.id, zone) },
-            onDeleteCustomCard = if (liveCard.isCustom) {
-                { viewModel.deleteCustomCard(liveCard.id) }
-            } else null,
-            printingVariants = extrasForCard?.printingVariants.orEmpty(),
-            rulings = extrasForCard?.rulings.orEmpty(),
-            isLoadingRulings = extrasForCard?.isLoadingRulings == true
-        )
+        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null })
     }
 
     if (showCreateCardDialog) {
@@ -391,17 +366,49 @@ fun VaultScreen(
         )
     }
 
-    if (showCsvImportDialog) {
-        VaultCsvImportDialog(
+    if (showCollections && showCsvImportDialog) {
+        val csvImportError by viewModel.csvImportError.collectAsStateWithLifecycle()
+        CsvImportDialog(
             isImporting = uiState.isImportingCsv,
             report = uiState.csvImportReport,
             collectionNames = collections.keys,
-            onImportCsv = { text, deckName, format, name, replace ->
-                if (name != null) collectionView = true
-                viewModel.importDelverCsv(text, deckName, format, name, replace)
+            importError = csvImportError,
+            onImportCsv = { text, name, _, replace ->
+                viewModel.importCollectionCsv(text, name, replace)
             },
             onClearReport = viewModel::clearCsvImportReport,
             onDismiss = { showCsvImportDialog = false }
         )
     }
+}
+
+
+@Composable
+internal fun CatalogCardInspector(viewModel: VaultViewModel, card: CardEntity, onDismiss: () -> Unit) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val extras by viewModel.inspectionExtras.collectAsStateWithLifecycle()
+    val liveCard = state.cards.firstOrNull { it.id == card.id } ?: card
+    val current = extras.takeIf { it.cardId == card.id }
+    val art = liveCard.imageUri ?: current?.imageUri
+    LaunchedEffect(card.id, state.showCardArt, state.isOnline, state.offlineOnlyMode) {
+        viewModel.loadCardInspectionExtras(liveCard)
+    }
+    CardInspectorSheet(
+        card = liveCard.copy(imageUri = art),
+        decks = state.decks,
+        isOnline = state.isOnline && !state.offlineOnlyMode,
+        showCardArt = state.showCardArt,
+        onDismiss = {
+            viewModel.cancelCardInspection()
+            onDismiss()
+        },
+        onToggleBookmark = { viewModel.toggleBookmark(liveCard) },
+        onAddToDeck = { deckId, zone -> viewModel.addCardToDeck(deckId, liveCard.id, zone) },
+        onDeleteCustomCard = if (liveCard.isCustom) {
+            { viewModel.deleteCustomCard(liveCard.id) }
+        } else null,
+        printingVariants = current?.printingVariants.orEmpty(),
+        rulings = current?.rulings.orEmpty(),
+        isLoadingRulings = current?.isLoadingRulings == true
+    )
 }

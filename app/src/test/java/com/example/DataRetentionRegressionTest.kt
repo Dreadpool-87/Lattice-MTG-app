@@ -11,6 +11,10 @@ import com.example.data.local.DeckZones
 import com.example.data.local.LatticeDatabase
 import com.example.data.local.StarterCards
 import com.example.data.remote.ScryfallCardDto
+import com.example.data.repository.Appearance
+import com.example.data.repository.PreferencesRepository
+import com.example.ui.theme.ThemeBrightnessMode
+import com.example.ui.theme.WubrgTheme
 import com.example.domain.DeckAnalytics
 import com.example.domain.DelverCsvImporter
 import kotlinx.coroutines.flow.first
@@ -38,6 +42,44 @@ class DataRetentionRegressionTest {
 
     @After
     fun closeDatabase() = database.close()
+
+    @Test
+    fun reopeningPreferencesReadsTheSavedThemeAndBrightness() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = PreferencesRepository(context)
+        val original = preferences.appearance.first()
+        try {
+            preferences.setWubrgTheme(WubrgTheme.BLUE)
+            preferences.setThemeBrightnessMode(ThemeBrightnessMode.LIGHT)
+            assertEquals(
+                Appearance(WubrgTheme.BLUE, ThemeBrightnessMode.LIGHT),
+                PreferencesRepository(context).appearance.first()
+            )
+        } finally {
+            preferences.setWubrgTheme(original.theme)
+            preferences.setThemeBrightnessMode(original.brightness)
+        }
+    }
+
+    @Test
+    fun offlineCatalogRefreshKeepsExistingCardIdentityAndBookmarks() = runTest {
+        val dao = database.cardDao()
+        val printing = ScryfallCardDto(
+            id = "00000000-0000-4000-8000-000000000001",
+            name = "Example Spell",
+            rarity = "rare"
+        ).toCardEntity()
+        val saved = printing.copy(id = "offline-example", isBookmarked = true, imageUri = "existing-art")
+        dao.insertIgnore(saved)
+        dao.storeCatalogPrinting(printing.copy(oracleText = "Updated rules", rarity = "unknown"))
+
+        val updated = checkNotNull(dao.getCardById(saved.id))
+        assertEquals(1, dao.getCardCount())
+        assertEquals("Updated rules", updated.oracleText)
+        assertEquals("rare", updated.rarity)
+        assertEquals("existing-art", updated.imageUri)
+        assertTrue(updated.isBookmarked)
+    }
 
     @Test
     fun startupSeedsOnlyCardsAndPreservesExistingDecks() = runTest {

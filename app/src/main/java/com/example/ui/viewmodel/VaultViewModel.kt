@@ -14,19 +14,24 @@ import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
 import com.example.data.repository.SyncResult
 import com.example.domain.CardRulingInfo
+import com.example.domain.CsvLookupException
 import com.example.domain.DelverImportReport
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class CardInspectionExtras(
+    val imageUri: String? = null,
     val cardId: String = "",
     val printingVariants: List<CardEntity> = emptyList(),
     val rulings: List<CardRulingInfo> = emptyList(),
@@ -74,10 +79,13 @@ class VaultViewModel(
     private val isSyncing = MutableStateFlow(false)
     private val isImportingCsv = MutableStateFlow(false)
     private val csvImportReport = MutableStateFlow<DelverImportReport?>(null)
+    private val _csvImportError = MutableStateFlow<String?>(null)
+    val csvImportError: StateFlow<String?> = _csvImportError
     private val statusBanner = MutableStateFlow<String?>(null)
 
     private val _inspectionExtras = MutableStateFlow(CardInspectionExtras())
     val inspectionExtras: StateFlow<CardInspectionExtras> = _inspectionExtras
+    private var inspectionJob: Job? = null
 
     private val searchedCardsFlow = query.flatMapLatest { q ->
         cardRepository.searchLocalCards(q)
@@ -162,7 +170,7 @@ class VaultViewModel(
             showCardArt = cardArt,
             statusBanner = banner
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = VaultViewModelInitial
@@ -210,7 +218,9 @@ class VaultViewModel(
     }
 
     fun loadCardInspectionExtras(card: CardEntity) {
-        viewModelScope.launch {
+        inspectionJob?.cancel()
+        inspectionJob = viewModelScope.launch {
+            val state = uiState.value
             val variants = cardRepository.getPrintingVariants(card)
             _inspectionExtras.value = CardInspectionExtras(
                 cardId = card.id,
@@ -221,14 +231,20 @@ class VaultViewModel(
                     !uiState.value.offlineOnlyMode &&
                     uiState.value.isOnline
             )
-            if (card.rulingsJson.isBlank() && card.scryfallId.isNotBlank()) {
-                val fetched = cardRepository.fetchAndCacheRulings(card, uiState.value.offlineOnlyMode)
-                _inspectionExtras.value = _inspectionExtras.value.copy(
-                    rulings = fetched,
-                    isLoadingRulings = false
-                )
+            if (state.showCardArt && card.imageUri.isNullOrBlank()) {
+                val image = cardRepository.fetchAndCacheArtwork(card, state.offlineOnlyMode)
+                _inspectionExtras.value = _inspectionExtras.value.copy(imageUri = image)
+            }
+            if (_inspectionExtras.value.isLoadingRulings) {
+                val fetched = cardRepository.fetchAndCacheRulings(card, state.offlineOnlyMode)
+                _inspectionExtras.value = _inspectionExtras.value.copy(rulings = fetched, isLoadingRulings = false)
             }
         }
+    }
+
+    fun cancelCardInspection() {
+        inspectionJob?.cancel()
+        _inspectionExtras.value = CardInspectionExtras()
     }
 
     fun toggleBookmark(card: CardEntity) {
@@ -281,15 +297,13 @@ class VaultViewModel(
         }
     }
 
-    fun importDelverCsv(
+    fun importCollectionCsv(
         csvContent: String,
-        createDeckName: String? = null,
-        deckFormat: String = "Commander",
-        collectionName: String? = null,
-        replaceCollection: Boolean = false
+        collectionName: String,
+        replaceCollection: Boolean
     ) {
-        if (csvContent.isBlank() || !isImportingCsv.compareAndSet(false, true)) return
-        csvImportReport.value = null
+        if (csvContent.isBlank() || collectionName.isBlank() || !isImportingCsv.compareAndSet(false, true)) return
+        clearCsvImportReport()
         viewModelScope.launch {
             try {
                 val report = cardRepository.importDelverCsv(
@@ -297,11 +311,8 @@ class VaultViewModel(
                     offlineOnlyMode = uiState.value.offlineOnlyMode
                 )
                 csvImportReport.value = report
-                val deckId = if (!createDeckName.isNullOrBlank()) {
-                    deckRepository.addVerifiedCsvToNewDeck(createDeckName, deckFormat, report)
-                } else null
-                val name = collectionName?.trim()?.takeIf { it.isNotEmpty() }
-                val savedCollection = if (name != null && report.verifiedRows.isNotEmpty()) {
+                val name = collectionName.trim()
+                val savedCollection = if (report.verifiedRows.isNotEmpty()) {
                     val quantities = report.verifiedRows.groupBy { checkNotNull(it.resolvedCard).id }
                         .mapValues { (_, matches) -> matches.sumOf { it.row.quantity } }
                     collectionDao.saveSnapshot(
@@ -310,9 +321,8 @@ class VaultViewModel(
                     )
                 } else false
                 csvImportReport.value = report.copy(
-                    deckIdCreated = deckId,
                     collectionName = name.takeIf { savedCollection },
-                    collectionNotice = if (name != null && !savedCollection) {
+                    collectionNotice = if (!savedCollection) {
                         when {
                             report.verifiedRows.isEmpty() -> "No verified cards. The collection was not saved."
                             !replaceCollection -> "A collection with that name already exists. Confirm replacement or use another name."
@@ -328,11 +338,13 @@ class VaultViewModel(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (error: CsvLookupException) {
+                _csvImportError.value = error.message
             } catch (_: Exception) {
-                statusBanner.value = if (csvImportReport.value == null) {
+                _csvImportError.value = if (csvImportReport.value == null) {
                     "Could not save the CSV import. Please try again."
                 } else {
-                    "Catalog cards were saved, but the list or deck could not be saved."
+                    "Catalog cards were saved, but the collection could not be saved."
                 }
             } finally {
                 isImportingCsv.value = false
@@ -342,6 +354,7 @@ class VaultViewModel(
 
     fun clearCsvImportReport() {
         csvImportReport.value = null
+        _csvImportError.value = null
     }
 
     fun syncFromScryfall() {

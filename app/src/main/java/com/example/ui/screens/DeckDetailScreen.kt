@@ -70,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.local.CardEntity
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckZones
 import com.example.ui.components.ColorIdentityRow
@@ -88,6 +89,7 @@ fun DeckDetailScreen(
     onBack: () -> Unit,
     onAskOracleAboutDeck: (Long) -> Unit,
     onOpenSynergyAnalyzer: (Long) -> Unit,
+    cardInspector: @Composable (CardEntity, () -> Unit) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -99,6 +101,7 @@ fun DeckDetailScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddPicker by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var inspectedCard by remember { mutableStateOf<CardEntity?>(null) }
 
     LaunchedEffect(uiState.snackbarMessage) {
         val msg = uiState.snackbarMessage
@@ -246,6 +249,7 @@ fun DeckDetailScreen(
                             DeckZones.MAYBEBOARD to deckWithEntries.maybeboardEntries.sumOf { it.entry.quantity }
                         ),
                         onSelectZone = viewModel::setActiveZone,
+                        onInspectCard = { inspectedCard = it },
                         onAdjustQty = { cardId, delta -> viewModel.adjustQuantity(cardId, uiState.activeZone, delta) },
                         onMoveZone = { cardId, toZone -> viewModel.moveZone(cardId, uiState.activeZone, toZone) },
                         modifier = Modifier.weight(1f)
@@ -462,6 +466,8 @@ fun DeckDetailScreen(
         }
     }
 
+    inspectedCard?.let { card -> cardInspector(card) { inspectedCard = null } }
+
     if (showAddPicker) {
         AddCardPickerDialog(
             query = uiState.cardPickerQuery,
@@ -494,6 +500,7 @@ private fun DeckListZoneTab(
     activeZone: String,
     zoneCounts: Map<String, Int>,
     onSelectZone: (String) -> Unit,
+    onInspectCard: (CardEntity) -> Unit,
     onAdjustQty: (String, Int) -> Unit,
     onMoveZone: (String, String) -> Unit,
     modifier: Modifier = Modifier
@@ -540,6 +547,7 @@ private fun DeckListZoneTab(
                 items(deckEntries.sortedBy { it.card.cmc }, key = { it.entry.id }) { item ->
                     DeckEntryRow(
                         item = item,
+                        onInspect = { onInspectCard(item.card) },
                         onDecrement = { onAdjustQty(item.card.id, -1) },
                         onIncrement = { onAdjustQty(item.card.id, 1) },
                         onMoveZone = { toZone -> onMoveZone(item.card.id, toZone) }
@@ -553,6 +561,7 @@ private fun DeckListZoneTab(
 @Composable
 private fun DeckEntryRow(
     item: DeckEntryWithCard,
+    onInspect: () -> Unit,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit,
     onMoveZone: (String) -> Unit
@@ -582,7 +591,10 @@ private fun DeckEntryRow(
                 )
             }
             Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f).clickable(onClick = onInspect)
+                    .testTag("inspect_deck_card_${item.card.id}")
+            ) {
                 Text(
                     text = item.card.name,
                     style = MaterialTheme.typography.titleSmall,

@@ -8,6 +8,8 @@ import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
+import com.example.domain.CsvLookupException
+import com.example.domain.DelverImportReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,6 +28,12 @@ data class DecksUiState(
     val statusMessage: String? = null
 )
 
+data class DeckCsvImportState(
+    val isImporting: Boolean = false,
+    val report: DelverImportReport? = null,
+    val error: String? = null
+)
+
 class DecksViewModel(
     private val deckRepository: DeckRepository,
     private val cardRepository: CardRepository,
@@ -36,6 +44,8 @@ class DecksViewModel(
     private val formatFilter = MutableStateFlow("All")
     private val searchQuery = MutableStateFlow("")
     private val statusMessage = MutableStateFlow<String?>(null)
+    private val _csvImport = MutableStateFlow(DeckCsvImportState())
+    val csvImport: StateFlow<DeckCsvImportState> = _csvImport
 
     val uiState: StateFlow<DecksUiState> = combine(
         deckRepository.allDecks,
@@ -137,6 +147,42 @@ class DecksViewModel(
                 throw cancelled
             } catch (_: Exception) {
                 statusMessage.value = "Could not import the deck. Check the decklist and try again."
+            }
+        }
+    }
+
+    fun clearCsvImport() {
+        if (!_csvImport.value.isImporting) _csvImport.value = DeckCsvImportState()
+    }
+
+    fun importDeckCsv(name: String, format: String, csvText: String, onImported: (Long) -> Unit) {
+        if (csvText.isBlank() || _csvImport.value.isImporting) return
+        _csvImport.value = DeckCsvImportState(isImporting = true)
+        viewModelScope.launch {
+            try {
+                val report = cardRepository.importDelverCsv(csvText, uiState.value.offlineOnlyMode)
+                val deckId = deckRepository.addVerifiedCsvToNewDeck(name, format, report)
+                if (deckId == null) {
+                    _csvImport.value = DeckCsvImportState(
+                        report = report,
+                        error = if (report.resolutions.isEmpty()) {
+                            "The CSV contains no cards. No deck was saved."
+                        } else {
+                            "Some rows could not be verified. No deck was saved."
+                        }
+                    )
+                } else {
+                    statusMessage.value = "Imported ${report.totalVerifiedCopies} cards into \"$name\"."
+                    _csvImport.value = DeckCsvImportState()
+                    onImported(deckId)
+                }
+            } catch (cancelled: CancellationException) {
+                _csvImport.value = DeckCsvImportState()
+                throw cancelled
+            } catch (error: CsvLookupException) {
+                _csvImport.value = DeckCsvImportState(error = error.message)
+            } catch (_: Exception) {
+                _csvImport.value = DeckCsvImportState(error = "Could not import the CSV deck. Please try again.")
             }
         }
     }

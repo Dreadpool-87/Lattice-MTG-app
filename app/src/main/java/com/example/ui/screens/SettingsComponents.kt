@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.ui.components.ManaSymbolPip
+import com.example.ui.theme.WubrgColorStrip
 import com.example.ui.theme.WubrgTheme
 
 @Composable
@@ -132,7 +133,11 @@ internal fun WubrgThemeOptionCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                ManaSymbolPip(symbol = theme.manaCode, size = 24.dp)
+                if (theme == WubrgTheme.WUBRG) {
+                    WubrgColorStrip(Modifier.size(width = 56.dp, height = 14.dp))
+                } else {
+                    ManaSymbolPip(symbol = theme.manaCode, size = 24.dp)
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)

@@ -1,8 +1,7 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -67,12 +65,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.data.local.DeckEntity
 import com.example.data.local.DeckWithEntries
 import com.example.ui.components.ColorIdentityRow
 import com.example.ui.components.ManaSymbolPip
 import com.example.ui.components.VaultStatusBadge
-import com.example.ui.theme.LatticeForestBase
-import com.example.ui.theme.LatticeSparkGreen
+import com.example.ui.theme.LocalWubrgTheme
+import com.example.ui.theme.WubrgTheme
+import com.example.ui.theme.WubrgColorStrip
 import com.example.ui.viewmodel.DecksViewModel
 
 private val deckFormats = listOf("All", "Commander", "Modern", "Standard", "Pioneer", "Pauper", "Casual")
@@ -86,8 +86,11 @@ fun DecksScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val csvImport by viewModel.csvImport.collectAsStateWithLifecycle()
     var showCreateDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showCsvImportDialog by remember { mutableStateOf(false) }
+    var deckToDelete by remember { mutableStateOf<DeckEntity?>(null) }
 
     LaunchedEffect(uiState.statusMessage) {
         val msg = uiState.statusMessage
@@ -106,114 +109,52 @@ fun DecksScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("decks_list")
                 .widthIn(max = 720.dp)
         ) {
             item {
-                // Hero Banner
-                Box(
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(196.dp)
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            RoundedCornerShape(22.dp)
-                        )
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("decks_header")
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_lattice_hero),
-                        contentDescription = "Lattice MTG Arcane Deck Studio",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        Color(0x660B0F17),
-                                        Color(0xE60B0F17)
-                                    )
-                                )
-                            )
-                    )
                     Column(
-                        verticalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            VaultStatusBadge(
-                                isOnline = uiState.isOnline,
-                                offlineOnlyMode = uiState.offlineOnlyMode,
-                                cachedCardCount = uiState.cachedCardCount
+                            Image(
+                                painter = painterResource(R.drawable.lattice_logo),
+                                contentDescription = null,
+                                modifier = Modifier.size(38.dp)
                             )
-                            Surface(
-                                color = LatticeForestBase.copy(alpha = 0.85f),
-                                shape = RoundedCornerShape(12.dp),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    Color.White.copy(alpha = 0.18f)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Lattice MTG", style = MaterialTheme.typography.titleLarge)
+                                VaultStatusBadge(
+                                    isOnline = uiState.isOnline,
+                                    offlineOnlyMode = uiState.offlineOnlyMode,
+                                    cachedCardCount = uiState.cachedCardCount
                                 )
+                            }
+                            IconButton(
+                                onClick = onOpenSettings,
+                                modifier = Modifier.testTag("open_settings_button_decks")
                             ) {
-                                IconButton(
-                                    onClick = onOpenSettings,
-                                    modifier = Modifier
-                                        .minimumInteractiveComponentSize()
-                                        .testTag("open_settings_button_decks")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Settings,
-                                        contentDescription = stringResource(R.string.action_open_settings),
-                                        tint = Color(0xFFF6EFE2)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Filled.Settings,
+                                    contentDescription = stringResource(R.string.action_open_settings)
+                                )
                             }
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Surface(
-                                color = LatticeForestBase,
-                                shape = RoundedCornerShape(12.dp),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.2.dp,
-                                    LatticeSparkGreen.copy(alpha = 0.7f)
-                                ),
-                                modifier = Modifier.size(46.dp)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.lattice_logo),
-                                        contentDescription = "Lattice MTG Logo",
-                                        modifier = Modifier.size(30.dp)
-                                    )
-                                }
-                            }
-                            Column {
-                                Text(
-                                    text = "LATTICE MTG",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = Color(0xFFF6EFE2)
-                                )
-                                Text(
-                                    text = "Offline-first Room decklists, synergy lattice & playtester",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFFD5CCBC)
-                                )
-                            }
+                        if (LocalWubrgTheme.current == WubrgTheme.WUBRG) {
+                            WubrgColorStrip(Modifier.fillMaxWidth().height(5.dp))
                         }
                     }
                 }
@@ -332,7 +273,7 @@ fun DecksScreen(
                         deckWithEntries = deckItem,
                         onOpen = { onOpenDeck(deckItem.deck.id) },
                         onDuplicate = { viewModel.duplicateDeck(deckItem.deck.id) },
-                        onDelete = { viewModel.deleteDeck(deckItem.deck.id, deckItem.deck.name) },
+                        onDelete = { deckToDelete = deckItem.deck },
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
@@ -353,9 +294,51 @@ fun DecksScreen(
     if (showImportDialog) {
         ImportDeckDialog(
             onDismiss = { showImportDialog = false },
+            onChooseCsv = {
+                showImportDialog = false
+                viewModel.clearCsvImport()
+                showCsvImportDialog = true
+            },
             onImport = { name, format, raw ->
                 showImportDialog = false
                 viewModel.importDeck(name, format, raw, onOpenDeck)
+            }
+        )
+    }
+    if (showCsvImportDialog) {
+        CsvImportDialog(
+            isImporting = csvImport.isImporting,
+            report = csvImport.report,
+            forDeck = true,
+            importError = csvImport.error,
+            onImportCsv = { csv, name, format, _ ->
+                viewModel.importDeckCsv(name, format, csv) { deckId ->
+                    showCsvImportDialog = false
+                    onOpenDeck(deckId)
+                }
+            },
+            onClearReport = viewModel::clearCsvImport,
+            onDismiss = { showCsvImportDialog = false }
+        )
+    }
+    deckToDelete?.let { deck ->
+        AlertDialog(
+            onDismissRequest = { deckToDelete = null },
+            title = { Text("Delete deck?") },
+            text = { Text("Delete \"${deck.name}\" permanently?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deckToDelete = null
+                        viewModel.deleteDeck(deck.id, deck.name)
+                    },
+                    modifier = Modifier.testTag("confirm_delete_deck_button")
+                ) {
+                    Text("Delete deck", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deckToDelete = null }) { Text("Cancel") }
             }
         )
     }
@@ -604,24 +587,27 @@ private fun CreateDeckDialog(
 @Composable
 private fun ImportDeckDialog(
     onDismiss: () -> Unit,
+    onChooseCsv: () -> Unit,
     onImport: (String, String, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var format by remember { mutableStateOf("Commander") }
-    var rawText by remember {
-        mutableStateOf(
-            "// Commander\n1 Urza, Lord High Artificer\n\n// Mainboard\n1 Sol Ring\n1 Mycosynth Lattice\n1 Counterspell\n10 Island"
-        )
-    }
+    var rawText by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Import Decklist Offline", style = MaterialTheme.typography.headlineSmall) },
+        title = { Text("Import deck", style = MaterialTheme.typography.headlineSmall) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
+                OutlinedButton(
+                    onClick = onChooseCsv,
+                    modifier = Modifier.fillMaxWidth().testTag("open_deck_csv_import")
+                ) {
+                    Text("Import CSV file")
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
