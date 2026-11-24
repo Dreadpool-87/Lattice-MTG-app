@@ -583,7 +583,13 @@ object SynergyAnalyzerEngine {
             }
         }
 
-        // 2. Dynamic functional synergy discovery for any custom/imported cards
+        val creatureTokenMakers = uniqueCards.filter { creatureTokenCreation.containsMatchIn(it.oracleText) }
+            .map { it.id }.toSet()
+        val creatureEntryEffects = uniqueCards.mapNotNull { card ->
+            creatureEntryTrigger.find(card.oracleText)?.groupValues?.get(1)?.let { card.id to it }
+        }.toMap()
+
+        // 2. Dynamic relationships based on the analyzed cards
         for (i in uniqueCards.indices) {
             for (j in i + 1 until uniqueCards.size) {
                 val a = uniqueCards[i]
@@ -593,6 +599,8 @@ object SynergyAnalyzerEngine {
 
                 val dynamic = tutorRelationship(a, b, key, inLibrary)
                     ?: tutorRelationship(b, a, key, inLibrary)
+                    ?: creatureTokenRelationship(a, b, key, creatureTokenMakers, creatureEntryEffects)
+                    ?: creatureTokenRelationship(b, a, key, creatureTokenMakers, creatureEntryEffects)
                     ?: evaluateDynamicPair(a, b, key)
                 if (dynamic != null) {
                     seenPairs.add(key)
@@ -652,6 +660,44 @@ object SynergyAnalyzerEngine {
             strength = 2,
             title = "Artifact Tutor",
             explanation = "$condition, it can put ${target.name} from your library $destinationText."
+        )
+    }
+
+    // Match explicit creation of creature tokens, excluding copy effects and instructions
+    // for other players. Only triggers without additional entry restrictions are supported.
+    private val creatureTokenCreation = Regex(
+        """^(?:• )?(?:(?:when(?:ever)?|at) [^,\r\n]+, )?(?:you may )?create """ +
+            """(?:a|an|one|two|three|four|five|six) (?:tapped )?\d+/\d+ """ +
+            """(?:[\p{L}-]+ ){0,8}creature tokens?(?=\.| with\b| for each\b|$)""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)
+    )
+
+    private val creatureEntryTrigger = Regex(
+        """^whenever (?:a(?:nother)? creature (?:you control enters(?: the battlefield)?|""" +
+            """enters(?: the battlefield)? under your control)|""" +
+            """one or more creatures (?:you control enter(?: the battlefield)?|""" +
+            """enter(?: the battlefield)? under your control)), (?!if\b)([^\r\n]+)$""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)
+    )
+
+    private fun creatureTokenRelationship(
+        producer: CardEntity,
+        payoff: CardEntity,
+        key: String,
+        creatureTokenMakers: Set<String>,
+        creatureEntryEffects: Map<String, String>
+    ): CardRelationship? {
+        if (producer.id !in creatureTokenMakers) return null
+        val effect = creatureEntryEffects[payoff.id] ?: return null
+        return CardRelationship(
+            id = key,
+            cardA = producer,
+            cardB = payoff,
+            type = RelationshipType.ENGINE_ENABLER,
+            strength = 2,
+            title = "Creature Token Entry Trigger",
+            explanation = "When ${producer.name} creates creature tokens under your control while you control " +
+                "${payoff.name}, their entry triggers ${payoff.name}. Its effect reads “$effect”"
         )
     }
 

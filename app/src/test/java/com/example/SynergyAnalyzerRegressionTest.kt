@@ -166,6 +166,61 @@ class SynergyAnalyzerRegressionTest {
         assertFalse(all.graphRelationships.isEmpty())
     }
 
+    @Test
+    fun `creature token creation triggers Impact Tremors in both pair orders`() {
+        val pyromancer = card(
+            "Young Pyromancer", "Creature — Human Shaman", 2.0,
+            "Whenever you cast an instant or sorcery spell, create a 1/1 red Elemental creature token."
+        )
+        val tremors = card(
+            "Impact Tremors", "Enchantment", 2.0,
+            "Whenever a creature you control enters, this enchantment deals 1 damage to each opponent."
+        )
+        val servos = card(
+            "Servo Exhibition", "Sorcery", 2.0,
+            "Create two 1/1 colorless Servo artifact creature tokens."
+        )
+
+        val forward = analyze(pyromancer, tremors).relationships.single()
+        val reverse = analyze(tremors, pyromancer).relationships.single()
+        val servoLink = analyze(servos, tremors).relationships.single()
+
+        assertEquals(RelationshipType.ENGINE_ENABLER, forward.type)
+        assertEquals(pyromancer, forward.cardA)
+        assertEquals(tremors, forward.cardB)
+        assertEquals(forward, reverse)
+        assertEquals(forward.type, servoLink.type)
+        assertTrue("under your control" in forward.explanation)
+        assertTrue("1 damage to each opponent" in forward.explanation)
+    }
+
+    @Test
+    fun `token entry rules respect creature type and control restrictions`() {
+        val tremors = card(
+            "Impact Tremors", "Enchantment", 2.0,
+            "Whenever a creature you control enters, this enchantment deals 1 damage to each opponent."
+        )
+        val maker = card("Raise the Alarm", "Instant", 2.0, "Create two 1/1 white Soldier creature tokens.")
+        val opponentMaker = card(
+            "Opponent Token Fixture", "Sorcery", 2.0,
+            "Each opponent may create a 1/1 white Soldier creature token."
+        )
+        val treasureMaker = card("Treasure Fixture", "Sorcery", 2.0, "Create a Treasure token.")
+        val nontokenPayoff = card(
+            "Nontoken Entry Fixture", "Enchantment", 2.0,
+            "Whenever a nontoken creature you control enters, draw a card."
+        )
+        val opponentPayoff = card(
+            "Opponent Entry Fixture", "Enchantment", 2.0,
+            "Whenever a creature an opponent controls enters, draw a card."
+        )
+
+        assertTrue(analyze(opponentMaker, tremors).relationships.isEmpty())
+        assertTrue(analyze(treasureMaker, tremors).relationships.isEmpty())
+        assertTrue(analyze(maker, nontokenPayoff).relationships.isEmpty())
+        assertTrue(analyze(maker, opponentPayoff).relationships.isEmpty())
+    }
+
     private fun mage(name: String, requirement: String) = card(
         name, "Creature — Human Wizard", 3.0,
         "When this creature enters, you may search your library for an artifact card with mana value $requirement, reveal that card, put it into your hand, then shuffle."
