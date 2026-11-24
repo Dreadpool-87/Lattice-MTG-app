@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.ContentResolver
+import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +37,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +49,56 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.domain.DelverImportReport
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import kotlin.coroutines.coroutineContext
+
+internal const val MAX_CSV_FILE_BYTES = 2 * 1024 * 1024
+
+internal suspend fun readCsvStreamBounded(input: InputStream): String {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    val output = ByteArrayOutputStream(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        coroutineContext.ensureActive()
+        val count = input.read(buffer, 0, minOf(buffer.size, MAX_CSV_FILE_BYTES - output.size() + 1))
+        coroutineContext.ensureActive()
+        if (count < 0) break
+        if (count > MAX_CSV_FILE_BYTES - output.size()) {
+            throw IOException("CSV file exceeds the 2 MiB size limit and was not loaded.")
+        }
+        output.write(buffer, 0, count)
+    }
+    return try {
+        Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(output.toByteArray())).toString()
+    } catch (error: CharacterCodingException) {
+        throw IOException("The selected CSV contains invalid UTF-8 text.", error)
+    }
+}
+
+private class CsvFileSelection(val uri: Uri)
+
+private suspend fun readCsvFile(resolver: ContentResolver, uri: Uri) = withContext(Dispatchers.IO) {
+    val stream = resolver.openInputStream(uri)
+        ?: throw IOException("Could not open the selected CSV file.")
+    val text = stream.use { readCsvStreamBounded(it) }
+    val name = try {
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
+    }
+    text to (name ?: "selected.csv")
+}
 
 @Composable
 fun VaultCsvImportDialog(
@@ -68,31 +121,44 @@ fun VaultCsvImportDialog(
     var replaceCollection by remember(collectionName, saveAsDeck, csvText) { mutableStateOf(false) }
     var deckFormat by remember { mutableStateOf("Commander") }
     var fileReadError by remember { mutableStateOf<String?>(null) }
+    var selection by remember { mutableStateOf<CsvFileSelection?>(null) }
+    val requestedFile = selection
+    val isReadingFile = requestedFile != null
 
     val openCsvLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
-            }.onSuccess { text ->
+        if (uri != null && !isImporting) {
+            selection = CsvFileSelection(uri)
+            fileReadError = null
+            onClearReport()
+        }
+    }
+
+    LaunchedEffect(requestedFile) {
+        val request = requestedFile ?: return@LaunchedEffect
+        try {
+            val (text, name) = readCsvFile(context.contentResolver, request.uri)
+            if (selection === request) {
                 csvText = text
-                fileLabel = runCatching {
-                    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                        if (it.moveToFirst()) it.getString(0) else null
-                    }
-                }.getOrNull() ?: "selected.csv"
-                importName = checkNotNull(fileLabel).substringBeforeLast('.').takeUnless { it == "selected" }.orEmpty()
-                onClearReport()
-                fileReadError = null
-            }.onFailure { err ->
-                fileReadError = "Could not read CSV file: ${err.localizedMessage ?: "error"}"
+                fileLabel = name
+                importName = name.substringBeforeLast('.').takeUnless { it == "selected" }.orEmpty()
+                replaceCollection = false
             }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (selection === request) {
+                fileReadError = error.localizedMessage ?: "Could not read the selected CSV file."
+            }
+        } finally {
+            if (selection === request) selection = null
         }
     }
 
     AlertDialog(
         onDismissRequest = {
+            selection = null
             onClearReport()
             onDismiss()
         },
@@ -119,6 +185,7 @@ fun VaultCsvImportDialog(
                             arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")
                         )
                     },
+                    enabled = !isImporting,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -129,17 +196,36 @@ fun VaultCsvImportDialog(
                     Text(fileLabel?.let { "File: $it" } ?: "Choose Delver Lens .CSV File")
                 }
 
+                if (isReadingFile) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                        Text("Reading CSV file...", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
                 fileReadError?.let { err ->
                     Text(
                         text = err,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("csv_file_read_error")
                     )
                 }
 
                 OutlinedTextField(
                     value = csvText,
-                    onValueChange = { csvText = it },
+                    onValueChange = {
+                        if (csvText != it) {
+                            csvText = it
+                            fileLabel = null
+                            fileReadError = null
+                            onClearReport()
+                        }
+                    },
+                    enabled = !isImporting && !isReadingFile,
                     label = { Text("CSV Content") },
                     placeholder = { Text("Quantity,Name,Edition code,Collector's number,Language,Scryfall ID") },
                     minLines = 4,
@@ -217,7 +303,7 @@ fun VaultCsvImportDialog(
                         replaceCollection
                     )
                 },
-                enabled = csvText.isNotBlank() && !isImporting &&
+                enabled = csvText.isNotBlank() && !isImporting && !isReadingFile && fileReadError == null &&
                     (saveAsDeck || !existingCollection || replaceCollection),
                 modifier = Modifier.testTag("run_csv_import_button")
             ) {
@@ -227,6 +313,7 @@ fun VaultCsvImportDialog(
         dismissButton = {
             TextButton(
                 onClick = {
+                    selection = null
                     onClearReport()
                     onDismiss()
                 }
