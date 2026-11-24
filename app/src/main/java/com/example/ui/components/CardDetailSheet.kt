@@ -97,7 +97,7 @@ fun CardInspectorSheet(
     showCardArt: Boolean,
     onDismiss: () -> Unit,
     onToggleBookmark: () -> Unit,
-    onAddToDeck: (deckId: Long, zone: String) -> Unit,
+    onAddToDeck: ((deckId: Long, zone: String) -> Unit)? = null,
     onDeleteCustomCard: (() -> Unit)? = null,
     printingVariants: List<CardEntity> = emptyList(),
     rulings: List<CardRulingInfo> = emptyList(),
@@ -139,7 +139,7 @@ fun CardInspectorSheet(
             return@Dialog
         }
 
-        if (page == CardInspectorPage.ADD_TO_DECK) {
+        if (page == CardInspectorPage.ADD_TO_DECK && onAddToDeck != null) {
             CardDeckPicker(
                 cardName = card.name,
                 decks = decks,
@@ -244,7 +244,7 @@ fun CardInspectorSheet(
             ) {
                 Text("Official Rulings (${effectiveRulings.size})")
             }
-            if (decks.isNotEmpty()) {
+            if (onAddToDeck != null && decks.isNotEmpty()) {
                 OutlinedButton(
                     onClick = { page = CardInspectorPage.ADD_TO_DECK },
                     modifier = Modifier.fillMaxWidth().testTag("sheet_open_deck_picker")
