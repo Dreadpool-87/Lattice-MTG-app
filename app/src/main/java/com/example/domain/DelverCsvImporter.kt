@@ -5,6 +5,11 @@ import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
 import com.example.data.remote.ScryfallApi
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import retrofit2.HttpException
+import java.io.IOException
+
+class CsvLookupException(message: String, cause: Throwable) : IOException(message, cause)
 
 data class DelverCsvRow(
     val rowNumber: Int,
@@ -39,7 +44,6 @@ data class DelverImportReport(
     val unresolvedRows: List<DelverRowResolution>,
     val savedCardsCount: Int,
     val totalVerifiedCopies: Int,
-    val deckIdCreated: Long? = null,
     val collectionName: String? = null,
     val collectionNotice: String? = null
 )
@@ -344,7 +348,7 @@ object DelverCsvImporter {
             if (local != null) return local
 
             if (canFetchOnline && scryfallApi != null) {
-                return fetchRemoteSafe {
+                return fetchRemoteSafe(pauseMillis = 550) {
                     scryfallApi.getCardNamedExact(cardName, setCode = row.setCode?.lowercase()).toCardEntity()
                 }
             }
@@ -420,13 +424,22 @@ object DelverCsvImporter {
         return mismatches
     }
 
-    private suspend fun fetchRemoteSafe(block: suspend () -> CardEntity): CardEntity? {
+    private suspend fun fetchRemoteSafe(pauseMillis: Long = 125, block: suspend () -> CardEntity): CardEntity? {
+        delay(pauseMillis)
         return try {
             block()
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
-            null
+        } catch (e: HttpException) {
+            when (e.code()) {
+                404 -> null
+                429 -> throw CsvLookupException("Scryfall is rate limiting requests. Wait a moment and retry the import.", e)
+                else -> throw CsvLookupException("Scryfall could not verify the CSV (HTTP ${e.code()}). Try again later.", e)
+            }
+        } catch (e: IOException) {
+            throw CsvLookupException("Could not reach Scryfall to verify the CSV. Check your connection and try again.", e)
+        } catch (e: Exception) {
+            throw CsvLookupException("Could not read Scryfall's response while verifying the CSV.", e)
         }
     }
 

@@ -22,6 +22,8 @@ import com.example.domain.SynergyAnalyzerEngine
 import com.example.ui.theme.ThemeBrightnessMode
 import com.example.ui.theme.WubrgTheme
 import com.example.ui.theme.colorSchemeForWubrg
+import com.example.ui.theme.withOledSurfaces
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -237,26 +239,30 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `all five wubrg themes produce distinct palettes and persist in preferences`() = runTest {
-        assertEquals(5, WubrgTheme.entries.size)
+    fun `all six themes produce distinct palettes and OLED preferences persist`() = runTest {
+        assertEquals(6, WubrgTheme.entries.size)
         val darkPrimaries = WubrgTheme.entries.map { colorSchemeForWubrg(it, isDark = true).primary }.toSet()
         val lightPrimaries = WubrgTheme.entries.map { colorSchemeForWubrg(it, isDark = false).primary }.toSet()
-        assertEquals(5, darkPrimaries.size)
-        assertEquals(5, lightPrimaries.size)
+        assertEquals(6, darkPrimaries.size)
+        assertEquals(6, lightPrimaries.size)
 
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = PreferencesRepository(context)
-        prefs.setWubrgTheme(WubrgTheme.RED)
-        prefs.setThemeBrightnessMode(ThemeBrightnessMode.DARK)
+        prefs.setWubrgTheme(WubrgTheme.WUBRG)
+        prefs.setThemeBrightnessMode(ThemeBrightnessMode.OLED)
+        val oled = colorSchemeForWubrg(WubrgTheme.WUBRG, isDark = true).withOledSurfaces()
+        assertEquals(Color.Black, oled.background)
+        assertEquals(Color.Black, oled.surface)
+        assertEquals(colorSchemeForWubrg(WubrgTheme.WUBRG, isDark = true).primary, oled.primary)
         prefs.setShowCardArt(false)
 
-        assertEquals(WubrgTheme.RED, prefs.wubrgTheme.first())
-        assertEquals(ThemeBrightnessMode.DARK, prefs.themeBrightnessMode.first())
+        assertEquals(WubrgTheme.WUBRG, prefs.wubrgTheme.first())
+        assertEquals(ThemeBrightnessMode.OLED, prefs.themeBrightnessMode.first())
         assertFalse(prefs.showCardArt.first())
 
         prefs.resetAllPreferences()
         assertEquals(WubrgTheme.GREEN, prefs.wubrgTheme.first())
-        assertNotEquals(ThemeBrightnessMode.DARK, prefs.themeBrightnessMode.first())
+        assertEquals(ThemeBrightnessMode.SYSTEM, prefs.themeBrightnessMode.first())
     }
 
     @Test

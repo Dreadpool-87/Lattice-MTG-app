@@ -179,7 +179,9 @@ class DeckRepository(
         format: String,
         report: com.example.domain.DelverImportReport
     ): Long? {
-        if (report.verifiedRows.isEmpty()) return null
+        if (report.verifiedRows.isEmpty() || report.conflictRows.isNotEmpty() || report.unresolvedRows.isNotEmpty()) {
+            return null
+        }
         val entries = report.verifiedRows.groupBy { checkNotNull(it.resolvedCard).id }.map { (id, rows) ->
             val quantity = rows.fold(0) { total, resolution -> Math.addExact(total, resolution.row.quantity) }
             DeckEntryEntity(deckId = 0L, cardId = id, quantity = quantity)

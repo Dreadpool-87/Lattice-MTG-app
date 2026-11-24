@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -11,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Casino
@@ -33,9 +37,13 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -52,6 +60,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.ai.configureAppCheck
 import com.example.ui.screens.AboutScreen
+import com.example.ui.screens.CatalogCardInspector
 import com.example.ui.screens.DeckDetailScreen
 import com.example.ui.screens.DecksScreen
 import com.example.ui.screens.OracleChatScreen
@@ -60,8 +69,9 @@ import com.example.ui.screens.SynergyAnalyzerScreen
 import com.example.ui.screens.TabletopScreen
 import com.example.ui.screens.VaultScreen
 import com.example.ui.theme.LatticeMtgTheme
-import com.example.ui.theme.ThemeBrightnessMode
+import com.example.ui.theme.LocalWubrgTheme
 import com.example.ui.theme.WubrgTheme
+import com.example.ui.theme.WubrgSwatchColors
 import com.example.ui.viewmodel.DeckDetailViewModel
 import com.example.ui.viewmodel.DecksViewModel
 import com.example.ui.viewmodel.OracleChatViewModel
@@ -74,6 +84,7 @@ object Routes {
     const val DECKS = "decks"
     const val SYNERGY = "synergy"
     const val VAULT = "vault"
+    const val VAULT_CATALOG = "vault/catalog"
     const val ORACLE = "oracle"
     const val TABLETOP = "tabletop"
     const val SETTINGS = "settings"
@@ -103,16 +114,13 @@ class MainActivity : ComponentActivity() {
         val container = (application as LatticeApp).container
 
         setContent {
-            val wubrgTheme by container.preferencesRepository.wubrgTheme
-                .collectAsStateWithLifecycle(initialValue = WubrgTheme.GREEN)
-            val brightnessMode by container.preferencesRepository.themeBrightnessMode
-                .collectAsStateWithLifecycle(initialValue = ThemeBrightnessMode.SYSTEM)
+            val appearance by container.preferencesRepository.appearance
+                .collectAsStateWithLifecycle(initialValue = null)
 
-            LatticeMtgTheme(
-                wubrgTheme = wubrgTheme,
-                brightnessMode = brightnessMode
-            ) {
-                LatticeRootApp(container = container)
+            appearance?.let { saved ->
+                LatticeMtgTheme(saved.theme, saved.brightness) {
+                    LatticeRootApp(container = container)
+                }
             }
         }
     }
@@ -174,6 +182,24 @@ fun LatticeRootApp(container: AppContainer) {
         )
     )
 
+    val offlineCatalog = container.offlineCatalog
+    val catalogManifest by offlineCatalog.manifest.collectAsStateWithLifecycle()
+    val catalogInstalled by offlineCatalog.installed.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val newerCardData = catalogManifest?.packs.orEmpty().any {
+        it.id in catalogInstalled && catalogInstalled[it.id] != it.sha256
+    }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute in setOf(Routes.VAULT, Routes.VAULT_CATALOG, Routes.SETTINGS)) {
+            try {
+                offlineCatalog.check()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The cached cards stay available when the update check fails.
+            }
+        }
+    }
+
     val tabs = remember {
         listOf(
             NavTabItem(
@@ -231,7 +257,7 @@ fun LatticeRootApp(container: AppContainer) {
             bottomBar = {
                 if (!useNavRail && isTopLevelRoute) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                        tabs.forEach { tab ->
+                        tabs.forEachIndexed { index, tab ->
                             val selected = currentRoute == tab.route
                             NavigationBarItem(
                                 selected = selected,
@@ -239,15 +265,10 @@ fun LatticeRootApp(container: AppContainer) {
                                     navController.navigate(tab.route) {
                                         popUpTo(Routes.DECKS) { saveState = true }
                                         launchSingleTop = true
-                                        restoreState = true
+                                        restoreState = tab.route != Routes.VAULT
                                     }
                                 },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                        contentDescription = stringResource(tab.labelRes)
-                                    )
-                                },
+                                icon = { LatticeTabIcon(tab, selected, index) },
                                 label = {
                                     val labelRes = if (tab.route == Routes.VAULT) R.string.nav_vault_compact else tab.labelRes
                                     Text(
@@ -275,7 +296,7 @@ fun LatticeRootApp(container: AppContainer) {
                         containerColor = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.fillMaxHeight()
                     ) {
-                        tabs.forEach { tab ->
+                        tabs.forEachIndexed { index, tab ->
                             val selected = currentRoute == tab.route
                             NavigationRailItem(
                                 selected = selected,
@@ -283,15 +304,10 @@ fun LatticeRootApp(container: AppContainer) {
                                     navController.navigate(tab.route) {
                                         popUpTo(Routes.DECKS) { saveState = true }
                                         launchSingleTop = true
-                                        restoreState = true
+                                        restoreState = tab.route != Routes.VAULT
                                     }
                                 },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                        contentDescription = stringResource(tab.labelRes)
-                                    )
-                                },
+                                icon = { LatticeTabIcon(tab, selected, index) },
                                 label = { Text(stringResource(tab.labelRes)) },
                                 modifier = Modifier.testTag(tab.testTag)
                             )
@@ -337,7 +353,18 @@ fun LatticeRootApp(container: AppContainer) {
                         VaultScreen(
                             viewModel = vaultViewModel,
                             snackbarHostState = snackbarHostState,
-                            onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                            onOpenCatalog = { navController.navigate(Routes.VAULT_CATALOG) },
+                            newerCardData = newerCardData
+                        )
+                    }
+
+                    composable(Routes.VAULT_CATALOG) {
+                        VaultScreen(
+                            viewModel = vaultViewModel,
+                            snackbarHostState = snackbarHostState,
+                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                            onBackFromCatalog = { navController.popBackStack() }
                         )
                     }
 
@@ -361,7 +388,8 @@ fun LatticeRootApp(container: AppContainer) {
                             viewModel = settingsViewModel,
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
-                            onOpenAbout = { navController.navigate(Routes.ABOUT) }
+                            onOpenAbout = { navController.navigate(Routes.ABOUT) },
+                            offlineCatalog = offlineCatalog
                         )
                     }
 
@@ -389,6 +417,9 @@ fun LatticeRootApp(container: AppContainer) {
                             viewModel = detailVm,
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
+                            cardInspector = { card, close ->
+                                CatalogCardInspector(vaultViewModel, card, onDismiss = close)
+                            },
                             onAskOracleAboutDeck = { id ->
                                 oracleViewModel.selectContextDeck(id)
                                 navController.navigate(Routes.ORACLE) {
@@ -410,5 +441,28 @@ fun LatticeRootApp(container: AppContainer) {
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun LatticeTabIcon(tab: NavTabItem, selected: Boolean, index: Int) {
+    val image = if (selected) tab.selectedIcon else tab.unselectedIcon
+    val description = stringResource(tab.labelRes)
+    if (LocalWubrgTheme.current == WubrgTheme.WUBRG) {
+        val accent = WubrgSwatchColors[index]
+        Box(
+            modifier = Modifier.size(28.dp).background(accent, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = image,
+                contentDescription = description,
+                tint = if (accent.luminance() < 0.4f) Color.White else Color.Black,
+                modifier = Modifier.size(17.dp)
+            )
+        }
+    } else {
+        Icon(imageVector = image, contentDescription = description)
     }
 }

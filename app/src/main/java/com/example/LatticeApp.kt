@@ -8,6 +8,7 @@ import com.example.data.remote.ScryfallApi
 import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
+import com.example.data.repository.OfflineCatalogRepository
 import com.example.data.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,7 @@ class AppContainer(application: Application) {
     private val scryfallApi by lazy { ScryfallApi.create() }
     val chatDao by lazy { database.chatDao() }
     val vaultCollectionDao by lazy { database.vaultCollectionDao() }
+    val offlineCatalog by lazy { OfflineCatalogRepository(application, database, preferencesRepository) }
 
     val cardRepository by lazy {
         CardRepository(

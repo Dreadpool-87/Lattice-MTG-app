@@ -101,24 +101,25 @@ private suspend fun readCsvFile(resolver: ContentResolver, uri: Uri) = withConte
 }
 
 @Composable
-fun VaultCsvImportDialog(
+fun CsvImportDialog(
     isImporting: Boolean,
     report: DelverImportReport?,
-    collectionNames: Set<String>,
-    onImportCsv: (
-        csvText: String, deckName: String?, deckFormat: String, collectionName: String?, replace: Boolean
-    ) -> Unit,
+    forDeck: Boolean = false,
+    collectionNames: Set<String> = emptySet(),
+    importError: String? = null,
+    onImportCsv: (csvText: String, name: String, format: String, replace: Boolean) -> Unit,
     onClearReport: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var csvText by remember { mutableStateOf("") }
+    var pastedCsv by remember { mutableStateOf("") }
+    var fileCsv by remember { mutableStateOf<String?>(null) }
+    val csvText = fileCsv ?: pastedCsv
     var fileLabel by remember { mutableStateOf<String?>(null) }
-    var saveAsDeck by remember { mutableStateOf(false) }
     var importName by remember { mutableStateOf("") }
     val collectionName = importName.trim().ifBlank { "My cards" }
     val existingCollection = collectionNames.any { it.equals(collectionName, ignoreCase = true) }
-    var replaceCollection by remember(collectionName, saveAsDeck, csvText) { mutableStateOf(false) }
+    var replaceCollection by remember(collectionName, csvText) { mutableStateOf(false) }
     var deckFormat by remember { mutableStateOf("Commander") }
     var fileReadError by remember { mutableStateOf<String?>(null) }
     var selection by remember { mutableStateOf<CsvFileSelection?>(null) }
@@ -140,7 +141,7 @@ fun VaultCsvImportDialog(
         try {
             val (text, name) = readCsvFile(context.contentResolver, request.uri)
             if (selection === request) {
-                csvText = text
+                fileCsv = text
                 fileLabel = name
                 importName = name.substringBeforeLast('.').takeUnless { it == "selected" }.orEmpty()
                 replaceCollection = false
@@ -158,13 +159,15 @@ fun VaultCsvImportDialog(
 
     AlertDialog(
         onDismissRequest = {
-            selection = null
-            onClearReport()
-            onDismiss()
+            if (!isImporting) {
+                selection = null
+                onClearReport()
+                onDismiss()
+            }
         },
         title = {
             Text(
-                text = "Import CSV",
+                text = if (forDeck) "Import deck CSV" else "Import collection CSV",
                 style = MaterialTheme.typography.headlineSmall
             )
         },
@@ -193,7 +196,7 @@ fun VaultCsvImportDialog(
                 ) {
                     Icon(Icons.Filled.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(fileLabel?.let { "File: $it" } ?: "Choose Delver Lens .CSV File")
+                    Text(fileLabel?.let { "File: $it" } ?: "Choose CSV file")
                 }
 
                 if (isReadingFile) {
@@ -215,44 +218,50 @@ fun VaultCsvImportDialog(
                     )
                 }
 
-                OutlinedTextField(
-                    value = csvText,
-                    onValueChange = {
-                        if (csvText != it) {
-                            csvText = it
+                if (fileCsv != null) {
+                    Text("CSV file ready to import.", modifier = Modifier.testTag("csv_file_ready"))
+                    TextButton(
+                        enabled = !isImporting && !isReadingFile,
+                        onClick = {
+                            fileCsv = null
                             fileLabel = null
                             fileReadError = null
                             onClearReport()
                         }
-                    },
-                    enabled = !isImporting && !isReadingFile,
-                    label = { Text("CSV Content") },
-                    placeholder = { Text("Quantity,Name,Edition code,Collector's number,Language,Scryfall ID") },
-                    minLines = 4,
-                    maxLines = 6,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("csv_import_text_input")
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !saveAsDeck, onClick = { saveAsDeck = false; onClearReport() },
-                        enabled = !isImporting, label = { Text("My collection") })
-                    FilterChip(selected = saveAsDeck, onClick = { saveAsDeck = true; onClearReport() },
-                        enabled = !isImporting, label = { Text("Deck") })
+                    ) { Text("Paste CSV instead") }
+                } else {
+                    OutlinedTextField(
+                        value = pastedCsv,
+                        onValueChange = { text ->
+                            if (text.length > 32_768) {
+                                fileReadError = "Pasted CSV is too large to edit. Save it as a CSV file and select it."
+                            } else {
+                                pastedCsv = text
+                                fileReadError = null
+                                onClearReport()
+                            }
+                        },
+                        enabled = !isImporting && !isReadingFile,
+                        label = { Text("CSV Content") },
+                        placeholder = { Text("Quantity,Name,Edition code,Collector's number,Language,Scryfall ID") },
+                        minLines = 4,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth().testTag("csv_import_text_input")
+                    )
                 }
+
 
                 OutlinedTextField(
                     value = importName,
                     onValueChange = { importName = it; onClearReport() },
-                    label = { Text(if (saveAsDeck) "Deck name" else "Collection name") },
-                    placeholder = { Text(if (saveAsDeck) "Imported deck" else "My cards") },
+                    label = { Text(if (forDeck) "Deck name" else "Collection name") },
+                    placeholder = { Text(if (forDeck) "Imported deck" else "My cards") },
                     enabled = !isImporting,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (!saveAsDeck && existingCollection) {
+                if (!forDeck && existingCollection) {
                     FilterChip(
                         selected = replaceCollection,
                         onClick = { replaceCollection = !replaceCollection },
@@ -261,7 +270,7 @@ fun VaultCsvImportDialog(
                     )
                 }
 
-                if (saveAsDeck) {
+                if (forDeck) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.horizontalScroll(rememberScrollState())
@@ -269,7 +278,8 @@ fun VaultCsvImportDialog(
                         listOf("Commander", "Modern", "Standard", "Casual").forEach { fmt ->
                             FilterChip(
                                 selected = deckFormat == fmt,
-                                onClick = { deckFormat = fmt },
+                                onClick = { deckFormat = fmt; onClearReport() },
+                                enabled = !isImporting,
                                 label = { Text(fmt) }
                             )
                         }
@@ -286,6 +296,9 @@ fun VaultCsvImportDialog(
                     }
                 }
 
+                importError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
                 if (report != null) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     CsvReviewSummarySection(report = report)
@@ -297,21 +310,21 @@ fun VaultCsvImportDialog(
                 onClick = {
                     onImportCsv(
                         csvText,
-                        if (saveAsDeck) importName.trim().ifBlank { "Imported deck" } else null,
+                        if (forDeck) importName.trim().ifBlank { "Imported deck" } else collectionName,
                         deckFormat,
-                        collectionName.takeUnless { saveAsDeck },
                         replaceCollection
                     )
                 },
                 enabled = csvText.isNotBlank() && !isImporting && !isReadingFile && fileReadError == null &&
-                    (saveAsDeck || !existingCollection || replaceCollection),
+                    (forDeck || !existingCollection || replaceCollection),
                 modifier = Modifier.testTag("run_csv_import_button")
             ) {
-                Text(if (saveAsDeck) "Import deck" else "Import collection")
+                Text(if (forDeck) "Import deck" else "Import collection")
             }
         },
         dismissButton = {
             TextButton(
+                enabled = !isImporting,
                 onClick = {
                     selection = null
                     onClearReport()
@@ -348,7 +361,7 @@ private fun CsvReviewSummarySection(report: DelverImportReport) {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Verified: ${report.totalVerifiedCopies} copies in CSV. ${report.savedCardsCount} unique printings saved to Vault.",
+                    text = "Verified: ${report.totalVerifiedCopies} copies in CSV. ${report.savedCardsCount} unique printings in the card cache.",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -377,13 +390,13 @@ private fun CsvReviewSummarySection(report: DelverImportReport) {
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Conflicting / Mismatched Rows (${report.conflictRows.size}) — Skipped",
+                            text = "Conflicting / Mismatched Rows (${report.conflictRows.size}) — Skipped (showing up to 30)",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    report.conflictRows.forEach { res ->
+                    report.conflictRows.take(30).forEach { res ->
                         Text(
                             text = "Row ${res.row.rowNumber} (${res.row.name ?: res.row.scryfallId ?: "Row"}): ${res.statusDetail}",
                             style = MaterialTheme.typography.bodySmall,
@@ -416,12 +429,12 @@ private fun CsvReviewSummarySection(report: DelverImportReport) {
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Unresolved Rows (${report.unresolvedRows.size}) — Needs Review",
+                            text = "Unresolved Rows (${report.unresolvedRows.size}) — Needs Review (showing up to 30)",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    report.unresolvedRows.forEach { res ->
+                    report.unresolvedRows.take(30).forEach { res ->
                         Text(
                             text = "Row ${res.row.rowNumber} (${res.row.name ?: res.row.scryfallId ?: "Unknown"}): ${res.statusDetail}",
                             style = MaterialTheme.typography.bodySmall,

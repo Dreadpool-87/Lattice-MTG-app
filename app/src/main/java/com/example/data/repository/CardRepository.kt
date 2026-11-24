@@ -9,6 +9,9 @@ import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
 import com.example.domain.DelverCsvImporter
 import com.example.domain.DelverImportReport
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
@@ -80,7 +83,7 @@ class CardRepository(
     }
 
     suspend fun importDelverCsv(csvContent: String, offlineOnlyMode: Boolean): DelverImportReport {
-        val parsedRows = DelverCsvImporter.parseCsv(csvContent)
+        val parsedRows = withContext(Dispatchers.Default) { DelverCsvImporter.parseCsv(csvContent) }
         val canFetchOnline = !offlineOnlyMode && networkMonitor.isCurrentlyOnline()
         return DelverCsvImporter.matchAndImportRows(
             rows = parsedRows,
@@ -94,6 +97,27 @@ class CardRepository(
         val byOracle = card.oracleId.takeIf { it.isNotBlank() }?.let { cardDao.findByOracleId(it) }.orEmpty()
         val byName = cardDao.findAllByExactNameIgnoreCase(card.name)
         return (byOracle + byName).distinctBy { it.id }
+    }
+
+    suspend fun fetchAndCacheArtwork(card: CardEntity, offlineOnlyMode: Boolean): String? {
+        cardDao.getCardById(card.id)?.imageUri?.let { return it }
+        if (card.isCustom || offlineOnlyMode || !networkMonitor.isCurrentlyOnline()) return null
+
+        return try {
+            val printing = if (card.scryfallId.isNotBlank()) {
+                scryfallApi.getCardByScryfallId(card.scryfallId).toCardEntity()
+            } else {
+                val setCode = card.setCode.lowercase().takeUnless { it.isBlank() || it == "local" }
+                scryfallApi.getCardNamedExact(card.name, setCode).toCardEntity()
+            }
+            val image = printing.imageUri?.takeIf { it.startsWith("https://") }
+            if (image != null) cardDao.updateArtwork(card.id, image)
+            image
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
     }
 
     suspend fun fetchAndCacheRulings(card: CardEntity, offlineOnlyMode: Boolean): List<CardRulingInfo> {

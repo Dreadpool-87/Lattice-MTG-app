@@ -9,14 +9,13 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.core.app.ActivityOptionsCompat
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.screens.MAX_CSV_FILE_BYTES
-import com.example.ui.screens.VaultCsvImportDialog
+import com.example.ui.screens.CsvImportDialog
 import com.example.ui.screens.readCsvStreamBounded
 import com.example.ui.theme.LatticeMtgTheme
 import kotlinx.coroutines.CancellationException
@@ -101,6 +100,8 @@ class CsvReadLimitTest {
         val badFile = Uri.parse("content://com.example.csv-test/bad.csv")
         val slowFile = Uri.parse("content://com.example.csv-test/slow.csv")
         val nextFile = Uri.parse("content://com.example.csv-test/next.csv")
+        val exactFile = Uri.parse("content://com.example.csv-test/exact.csv")
+        resolver.registerInputStream(exactFile, ByteArray(MAX_CSV_FILE_BYTES) { 'x'.code.toByte() }.inputStream())
         val firstCsv = "Quantity,Name\n1,Sol Ring"
         val nextCsv = "Quantity,Name\n1,Forest"
         resolver.registerInputStream(firstFile, firstCsv.byteInputStream())
@@ -123,6 +124,7 @@ class CsvReadLimitTest {
         resolver.registerInputStream(nextFile, nextCsv.byteInputStream())
 
         var selectedUri = firstFile
+        var submitted: String? = null
         val owner = object : ActivityResultRegistryOwner {
             override val activityResultRegistry = object : ActivityResultRegistry() {
                 override fun <I, O> onLaunch(
@@ -139,11 +141,11 @@ class CsvReadLimitTest {
         composeRule.setContent {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
                 LatticeMtgTheme {
-                    VaultCsvImportDialog(
+                    CsvImportDialog(
                         isImporting = false,
                         report = null,
                         collectionNames = emptySet(),
-                        onImportCsv = { _, _, _, _, _ -> },
+                        onImportCsv = { csv, _, _, _ -> submitted = csv },
                         onClearReport = {},
                         onDismiss = {}
                     )
@@ -153,12 +155,15 @@ class CsvReadLimitTest {
 
         val picker = composeRule.onNodeWithTag("pick_csv_file_button")
         val importButton = composeRule.onNodeWithTag("run_csv_import_button")
-        val text = composeRule.onNodeWithTag("csv_import_text_input")
+        val ready = composeRule.onNodeWithTag("csv_file_ready")
+        val editor = composeRule.onNodeWithTag("csv_import_text_input")
         picker.performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
-            runCatching { text.assertTextContains(firstCsv) }.isSuccess
+            runCatching { ready.assertExists() }.isSuccess
         }
-        importButton.assertIsEnabled()
+        editor.assertDoesNotExist()
+        importButton.assertIsEnabled().performClick()
+        composeRule.runOnIdle { assertEquals(firstCsv, submitted) }
 
         composeRule.runOnIdle { selectedUri = badFile }
         picker.performClick()
@@ -166,7 +171,7 @@ class CsvReadLimitTest {
         composeRule.waitUntil(timeoutMillis = 5_000) {
             runCatching { error.assertExists() }.isSuccess
         }
-        text.assertTextContains(firstCsv)
+        ready.assertExists()
         importButton.assertIsNotEnabled()
 
         try {
@@ -178,14 +183,24 @@ class CsvReadLimitTest {
             composeRule.runOnIdle { selectedUri = nextFile }
             picker.performClick()
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                runCatching { text.assertTextContains(nextCsv) }.isSuccess
+                runCatching { importButton.assertIsEnabled() }.isSuccess
             }
         } finally {
             releaseSlowRead.countDown()
         }
         composeRule.waitUntil(timeoutMillis = 5_000) { slowReadClosed.count == 0L }
-        text.assertTextContains(nextCsv)
         error.assertDoesNotExist()
-        importButton.assertIsEnabled()
+        importButton.assertIsEnabled().performClick()
+        composeRule.runOnIdle { assertEquals(nextCsv, submitted) }
+
+        composeRule.runOnIdle { selectedUri = exactFile }
+        picker.performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            runCatching { importButton.assertIsEnabled() }.isSuccess
+        }
+        ready.assertExists()
+        editor.assertDoesNotExist()
+        importButton.performClick()
+        composeRule.runOnIdle { assertEquals(MAX_CSV_FILE_BYTES, submitted?.length) }
     }
 }

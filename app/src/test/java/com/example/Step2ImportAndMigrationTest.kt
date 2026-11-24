@@ -4,13 +4,17 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.room.Room
@@ -25,6 +29,7 @@ import com.example.data.local.LatticeDatabase
 import com.example.data.local.StarterCards
 import com.example.data.remote.ScryfallApi
 import com.example.data.remote.ScryfallCardDto
+import com.example.data.remote.ScryfallImageUrisDto
 import com.example.data.remote.ScryfallRulingsResponse
 import com.example.data.remote.ScryfallSearchResponse
 import com.example.data.repository.CardRepository
@@ -32,12 +37,21 @@ import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
 import com.example.domain.CsvRowMatchStatus
+import com.example.domain.CsvLookupException
 import com.example.domain.DelverCsvImporter
 import com.example.ui.screens.VaultScreen
+import com.example.ui.screens.DecksScreen
+import com.example.ui.screens.DeckDetailScreen
+import com.example.ui.screens.CatalogCardInspector
 import com.example.ui.theme.LatticeMtgTheme
+import com.example.ui.theme.WubrgTheme
 import com.example.ui.viewmodel.VaultViewModel
+import com.example.ui.viewmodel.DecksViewModel
+import com.example.ui.viewmodel.DeckDetailViewModel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -48,7 +62,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLooper
+import retrofit2.HttpException
+import retrofit2.Response
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -59,6 +77,7 @@ class Step2ImportAndMigrationTest {
 
     private fun createAbandonAttachmentsApi(
         failFuzzyLookup: Boolean = true,
+        remoteLookupFailure: HttpException? = null,
         namedInSet: Map<Pair<String, String?>, ScryfallCardDto> = emptyMap()
     ): ScryfallApi {
         val abandonAttachmentsId = "aaaaaaaa-1111-4444-8888-bbbbbbbbbbbb"
@@ -78,6 +97,7 @@ class Step2ImportAndMigrationTest {
             set = "tla",
             setName = "Avatar: The Last Airbender",
             collectorNumber = "205",
+            imageUris = ScryfallImageUrisDto(normal = "https://cards.scryfall.io/test.jpg"),
             keywords = emptyList(),
             legalities = mapOf("standard" to "legal", "commander" to "legal", "pauper" to "legal")
         )
@@ -91,14 +111,15 @@ class Step2ImportAndMigrationTest {
             }
 
             override suspend fun getCardNamedExact(exactName: String, setCode: String?): ScryfallCardDto {
+                if (remoteLookupFailure != null) throw remoteLookupFailure
                 namedInSet[exactName to setCode]?.let { return it }
                 if (exactName.equals("Abandon Attachments", ignoreCase = true)) return dto
-                error("Exact card not found: $exactName")
+                throw HttpException(Response.error<ScryfallCardDto>(404, "".toResponseBody()))
             }
 
             override suspend fun getCardByScryfallId(scryfallId: String): ScryfallCardDto {
                 if (scryfallId.equals(abandonAttachmentsId, ignoreCase = true)) return dto
-                error("Printing ID not found: $scryfallId")
+                throw HttpException(Response.error<ScryfallCardDto>(404, "".toResponseBody()))
             }
 
             override suspend fun getCardBySetNumberLang(
@@ -112,16 +133,126 @@ class Step2ImportAndMigrationTest {
                 ) {
                     return dto
                 }
-                error("Set/number/lang not found")
+                throw HttpException(Response.error<ScryfallCardDto>(404, "".toResponseBody()))
             }
 
             override suspend fun getCardBySetNumber(setCode: String, collectorNumber: String): ScryfallCardDto {
                 if (setCode.equals("tla", ignoreCase = true) && collectorNumber == "205") return dto
-                error("Set/number not found")
+                throw HttpException(Response.error<ScryfallCardDto>(404, "".toResponseBody()))
             }
 
             override suspend fun getCardRulings(scryfallId: String): ScryfallRulingsResponse =
                 ScryfallRulingsResponse()
+        }
+    }
+
+    @Test
+    fun `rate limited CSV lookup is reported as a service error`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val monitor = object : NetworkMonitor(context) {
+                override fun isCurrentlyOnline() = true
+            }
+            val failure = HttpException(Response.error<ScryfallCardDto>(429, "".toResponseBody()))
+            val repo = CardRepository(db.cardDao(), createAbandonAttachmentsApi(remoteLookupFailure = failure), monitor)
+            val error = runCatching {
+                repo.importDelverCsv("Quantity,Name,Set\n1,Refute,FDN", offlineOnlyMode = false)
+            }.exceptionOrNull()
+            assertTrue(error is CsvLookupException)
+            assertTrue(error?.message.orEmpty().contains("rate limiting"))
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `deck CSV stays out of collections and deletion requires confirmation`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val monitor = object : NetworkMonitor(context) {
+                override fun isCurrentlyOnline() = true
+            }
+            val cards = CardRepository(db.cardDao(), createAbandonAttachmentsApi(), monitor)
+            val decks = DeckRepository(db.deckDao(), cards)
+            val prefs = PreferencesRepository(context)
+            val model = DecksViewModel(decks, cards, monitor, prefs)
+            val vault = VaultViewModel(cards, decks, monitor, prefs, db.vaultCollectionDao())
+            composeRule.setContent {
+                LatticeMtgTheme(wubrgTheme = WubrgTheme.WUBRG) {
+                    val host = remember { SnackbarHostState() }
+                    val openDeck = remember { mutableStateOf<Long?>(null) }
+                    val deckId = openDeck.value
+                    if (deckId == null) {
+                        DecksScreen(model, host, onOpenDeck = { openDeck.value = it }, onOpenSettings = {})
+                    } else {
+                        val detail = remember(deckId) { DeckDetailViewModel(deckId, decks, cards) }
+                        DeckDetailScreen(
+                            detail, host, onBack = { openDeck.value = null },
+                            onAskOracleAboutDeck = {}, onOpenSynergyAnalyzer = {},
+                            cardInspector = { card, close -> CatalogCardInspector(vault, card, close) }
+                        )
+                    }
+                }
+            }
+
+            composeRule.onNodeWithTag("decks_header").assertIsDisplayed()
+            for (band in 0..4) {
+                composeRule.onNodeWithTag("wubrg_band_$band", useUnmergedTree = true).assertExists()
+            }
+            composeRule.onNodeWithTag("import_deck_button").performClick()
+            composeRule.onNodeWithTag("open_deck_csv_import").performClick()
+            composeRule.onNodeWithTag("pick_csv_file_button").assertIsEnabled()
+            val input = composeRule.onNodeWithTag("csv_import_text_input")
+            val validCsv = "Quantity,Name,Set\n2,Abandon Attachments,TLA"
+            input.performTextReplacement("$validCsv\n1,Unknown test card,FDN")
+            composeRule.onNodeWithTag("run_csv_import_button").performClick()
+            composeRule.waitUntil(timeoutMillis = 8_000) {
+                ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
+                model.csvImport.value.error == "Some rows could not be verified. No deck was saved."
+            }
+            assertTrue(runBlocking { decks.allDecks.first().isEmpty() })
+
+            input.performTextReplacement(validCsv)
+            composeRule.onNodeWithTag("run_csv_import_button").performClick()
+            composeRule.waitUntil(timeoutMillis = 8_000) {
+                ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
+                model.uiState.value.decks.size == 1 && !model.csvImport.value.isImporting
+            }
+            val deck = model.uiState.value.decks.single()
+            assertEquals(2, deck.entries.single().entry.quantity)
+            assertTrue(runBlocking { db.vaultCollectionDao().observeCards().first().isEmpty() })
+
+            val inspect = composeRule.onNodeWithTag("inspect_deck_card_${deck.entries.single().card.id}")
+            composeRule.waitUntil(timeoutMillis = 8_000) {
+                ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
+                runCatching { inspect.assertExists() }.isSuccess
+            }
+            inspect.performClick()
+            composeRule.onNodeWithTag("sheet_close_button").assertIsDisplayed()
+            composeRule.onNodeWithTag("sheet_card_art").assertExists()
+            composeRule.onNodeWithTag("sheet_close_button").performClick()
+            composeRule.onNodeWithTag("deck_detail_back_button").performClick()
+
+            val deleteTag = "delete_deck_${deck.deck.id}"
+            composeRule.onNodeWithTag("decks_list").performScrollToNode(hasTestTag(deleteTag))
+            composeRule.onNodeWithTag(deleteTag, useUnmergedTree = true).performClick()
+            composeRule.onNodeWithText("Delete deck?").assertIsDisplayed()
+            composeRule.onNodeWithText("Cancel").performClick()
+            assertEquals(1, runBlocking { decks.allDecks.first().size })
+
+            composeRule.onNodeWithTag(deleteTag, useUnmergedTree = true).performClick()
+            composeRule.onNodeWithTag("confirm_delete_deck_button").performClick()
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
+                model.uiState.value.decks.isEmpty()
+            }
+            assertTrue(runBlocking { decks.allDecks.first().isEmpty() })
+        } finally {
+            db.close()
         }
     }
 
@@ -418,10 +549,13 @@ class Step2ImportAndMigrationTest {
             composeRule.setContent {
                 LatticeMtgTheme {
                     val snackbarHostState = remember { SnackbarHostState() }
+                    val catalog = remember { androidx.compose.runtime.mutableStateOf(false) }
                     VaultScreen(
                         viewModel = viewModel,
                         snackbarHostState = snackbarHostState,
-                        onOpenSettings = {}
+                        onOpenSettings = {},
+                        onOpenCatalog = { catalog.value = true },
+                        onBackFromCatalog = if (catalog.value) ({ catalog.value = false }) else null
                     )
                 }
             }
@@ -431,6 +565,12 @@ class Step2ImportAndMigrationTest {
                 viewModel.uiState.value.cards.any { it.id == solRing.id }
             }
 
+            composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
+            composeRule.onNodeWithTag("open_csv_import_button").assertIsDisplayed()
+            composeRule.onNodeWithText("Browse catalog").performClick()
+            composeRule.onNodeWithTag("open_csv_import_button").assertDoesNotExist()
+            composeRule.onNodeWithTag("type_filter_artifact").assertDoesNotExist()
+            composeRule.onNodeWithTag("vault_catalog_filters").performClick()
             // Apply search + type filter
             composeRule.onNodeWithTag("vault_search_input").performTextInput("Sol Ring")
             composeRule.onNodeWithTag("type_filter_artifact").performClick()
@@ -457,6 +597,7 @@ class Step2ImportAndMigrationTest {
             assertEquals("Artifact", viewModel.uiState.value.selectedType)
             composeRule.onNodeWithTag("vault_card_${solRing.id}").assertIsDisplayed()
 
+            composeRule.onNodeWithContentDescription("Back to collections").performClick()
             // Clear filters and verify CSV Import dialog flow
             viewModel.clearFilters()
             composeRule.waitForIdle()
@@ -474,7 +615,7 @@ class Step2ImportAndMigrationTest {
                 .assertIsEnabled()
                 .performClick()
             composeRule.waitUntil(timeoutMillis = 8_000) {
-                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
                 viewModel.uiState.value.csvImportReport != null && !viewModel.uiState.value.isImportingCsv
             }
             composeRule.waitForIdle()

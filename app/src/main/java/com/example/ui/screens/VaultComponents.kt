@@ -64,7 +64,7 @@ fun VaultCardRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(
@@ -89,12 +89,12 @@ fun VaultCardRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RarityPill(rarity = card.rarity)
+                    if (card.rarity != "unknown") RarityPill(rarity = card.rarity)
                     val printingSuffix = buildString {
                         append(card.setCode)
                         if (card.collectorNumber.isNotBlank()) append(" #${card.collectorNumber}")
