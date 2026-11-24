@@ -193,7 +193,7 @@ class Step2ImportAndMigrationTest {
                         DeckDetailScreen(
                             detail, host, onBack = { openDeck.value = null },
                             onAskOracleAboutDeck = {}, onOpenSynergyAnalyzer = {},
-                            cardInspector = { cards, card, close -> CatalogCardInspector(vault, card, close, cards) }
+                            cardInspector = { cards, card, close -> CatalogCardInspector(vault, card, close, cards, allowAddToDeck = false) }
                         )
                     }
                 }
@@ -234,6 +234,7 @@ class Step2ImportAndMigrationTest {
             inspect.performClick()
             composeRule.onNodeWithTag("sheet_close_button").assertIsDisplayed()
             composeRule.onNodeWithTag("sheet_card_art").assertExists()
+            composeRule.onNodeWithTag("sheet_open_deck_picker").assertDoesNotExist()
             composeRule.onNodeWithTag("sheet_close_button").performClick()
             composeRule.onNodeWithTag("deck_detail_back_button").performClick()
 
@@ -543,6 +544,7 @@ class Step2ImportAndMigrationTest {
                 networkMonitor = onlineMonitor
             )
             val deckRepo = DeckRepository(db.deckDao(), cardRepo)
+            runBlocking { deckRepo.createDeck("Offline test deck", "Modern", "", emptyList()) }
             val prefs = PreferencesRepository(context)
             val viewModel = VaultViewModel(cardRepo, deckRepo, onlineMonitor, prefs, db.vaultCollectionDao())
 
@@ -562,7 +564,7 @@ class Step2ImportAndMigrationTest {
 
             val solRing = StarterCards.cards.first { it.name == "Sol Ring" }
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                viewModel.uiState.value.cards.any { it.id == solRing.id }
+                viewModel.uiState.value.cards.any { it.id == solRing.id } && viewModel.uiState.value.decks.isNotEmpty()
             }
 
             composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
@@ -587,6 +589,7 @@ class Step2ImportAndMigrationTest {
             composeRule.onNodeWithTag("vault_card_${solRing.id}").performClick()
             composeRule.waitForIdle()
             composeRule.onNodeWithTag("sheet_bookmark_button").assertIsDisplayed()
+            composeRule.onNodeWithTag("sheet_open_deck_picker").assertIsDisplayed()
 
             // Close detail sheet via explicit close button
             composeRule.onNodeWithTag("sheet_close_button").performClick()
@@ -637,6 +640,8 @@ class Step2ImportAndMigrationTest {
             composeRule.onNodeWithText("Close").performClick()
             composeRule.onNodeWithText("My cards").performClick()
             composeRule.onNodeWithText("×2").assertIsDisplayed()
+            composeRule.onNodeWithText("Abandon Attachments").performClick()
+            composeRule.onNodeWithTag("sheet_open_deck_picker").assertIsDisplayed()
         } finally {
             db.close()
         }

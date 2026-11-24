@@ -419,7 +419,7 @@ fun LatticeRootApp(container: AppContainer) {
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
                             cardInspector = { cards, card, close ->
-                                CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards)
+                                CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards, allowAddToDeck = false)
                             },
                             onAskOracleAboutDeck = { id ->
                                 oracleViewModel.selectContextDeck(id)

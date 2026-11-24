@@ -355,7 +355,7 @@ fun VaultScreen(
     }
 
     inspectedCard?.let { (cards, card) ->
-        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards)
+        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards, allowAddToDeck = true)
     }
 
     if (showCreateCardDialog) {
@@ -390,7 +390,8 @@ internal fun CatalogCardInspector(
     viewModel: VaultViewModel,
     initialCard: CardEntity,
     onDismiss: () -> Unit,
-    cards: List<CardEntity> = listOf(initialCard)
+    cards: List<CardEntity> = listOf(initialCard),
+    allowAddToDeck: Boolean
 ) {
     var index by remember(initialCard.id, cards) {
         mutableStateOf(cards.indexOfFirst { it.id == initialCard.id })
@@ -416,7 +417,9 @@ internal fun CatalogCardInspector(
             onDismiss()
         },
         onToggleBookmark = { viewModel.toggleBookmark(liveCard) },
-        onAddToDeck = { deckId, zone -> viewModel.addCardToDeck(deckId, liveCard.id, zone) },
+        onAddToDeck = if (allowAddToDeck) {
+            { deckId, zone -> viewModel.addCardToDeck(deckId, liveCard.id, zone) }
+        } else null,
         onDeleteCustomCard = if (liveCard.isCustom) {
             { viewModel.deleteCustomCard(liveCard.id) }
         } else null,
