@@ -9,6 +9,7 @@ import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.OfflineCatalogRepository
+import com.example.data.repository.OfflineArtworkRepository
 import com.example.data.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,7 @@ class AppContainer(application: Application) {
     val chatDao by lazy { database.chatDao() }
     val vaultCollectionDao by lazy { database.vaultCollectionDao() }
     val offlineCatalog by lazy { OfflineCatalogRepository(application, database, preferencesRepository) }
+    val offlineArtwork by lazy { OfflineArtworkRepository(application, database, preferencesRepository, offlineCatalog) }
 
     val cardRepository by lazy {
         CardRepository(

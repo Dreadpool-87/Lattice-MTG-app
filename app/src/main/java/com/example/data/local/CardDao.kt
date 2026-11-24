@@ -1,6 +1,8 @@
 package com.example.data.local
 
 import androidx.room.Dao
+import com.example.data.repository.ArtworkCard
+import com.example.data.repository.ArtworkOption
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -10,8 +12,18 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CardDao {
-    @Query("UPDATE cards SET imageUri = :uri WHERE id = :cardId")
-    suspend fun updateArtwork(cardId: String, uri: String)
+    @Query("SELECT id, scryfallId, oracleId, setCode, collectorNumber, lang, imageUri, cardFacesJson FROM cards WHERE scryfallId != ''")
+    suspend fun getArtworkCards(): List<ArtworkCard>
+
+    @Query("""
+        SELECT LOWER(setCode) AS id, MIN(setName) || ' (' || UPPER(setCode) || ')' AS label
+        FROM cards WHERE setCode != '' AND scryfallId != ''
+        GROUP BY LOWER(setCode) ORDER BY label COLLATE NOCASE
+    """)
+    suspend fun getArtworkSets(): List<ArtworkOption>
+
+    @Query("UPDATE cards SET imageUri = :uri, cardFacesJson = :faces WHERE id = :cardId")
+    suspend fun updateArtwork(cardId: String, uri: String, faces: String)
 
     @Query("SELECT * FROM cards ORDER BY isBookmarked DESC, name ASC")
     fun observeAllCards(): Flow<List<CardEntity>>

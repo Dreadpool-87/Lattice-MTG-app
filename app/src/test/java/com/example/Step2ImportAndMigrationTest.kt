@@ -193,7 +193,7 @@ class Step2ImportAndMigrationTest {
                         DeckDetailScreen(
                             detail, host, onBack = { openDeck.value = null },
                             onAskOracleAboutDeck = {}, onOpenSynergyAnalyzer = {},
-                            cardInspector = { card, close -> CatalogCardInspector(vault, card, close) }
+                            cardInspector = { cards, card, close -> CatalogCardInspector(vault, card, close, cards) }
                         )
                     }
                 }

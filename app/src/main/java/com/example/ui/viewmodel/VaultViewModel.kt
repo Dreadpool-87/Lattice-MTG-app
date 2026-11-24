@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 
 data class CardInspectionExtras(
     val imageUri: String? = null,
+    val artworkFacesJson: String? = null,
     val cardId: String = "",
     val printingVariants: List<CardEntity> = emptyList(),
     val rulings: List<CardRulingInfo> = emptyList(),
@@ -217,7 +218,7 @@ class VaultViewModel(
         statusBanner.value = null
     }
 
-    fun loadCardInspectionExtras(card: CardEntity) {
+    fun loadCardInspectionExtras(card: CardEntity, fetchArtwork: Boolean = true) {
         inspectionJob?.cancel()
         inspectionJob = viewModelScope.launch {
             val state = uiState.value
@@ -231,9 +232,11 @@ class VaultViewModel(
                     !uiState.value.offlineOnlyMode &&
                     uiState.value.isOnline
             )
-            if (state.showCardArt && card.imageUri.isNullOrBlank()) {
-                val image = cardRepository.fetchAndCacheArtwork(card, state.offlineOnlyMode)
-                _inspectionExtras.value = _inspectionExtras.value.copy(imageUri = image)
+            if (fetchArtwork && state.showCardArt && card.imageUri.isNullOrBlank()) {
+                val artwork = cardRepository.fetchAndCacheArtwork(card, state.offlineOnlyMode)
+                _inspectionExtras.value = _inspectionExtras.value.copy(
+                    imageUri = artwork?.imageUri, artworkFacesJson = artwork?.cardFacesJson
+                )
             }
             if (_inspectionExtras.value.isLoadingRulings) {
                 val fetched = cardRepository.fetchAndCacheRulings(card, state.offlineOnlyMode)
