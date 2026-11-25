@@ -134,3 +134,23 @@ test("scope refusals and unmarked answers do not return arbitrary generated text
     assert.equal(json.neurons, 4);
   }
 });
+
+test("deck curve answers receive per-turn mana constraints and use plain-text emphasis", async () => {
+  const { env, seen } = fixtures();
+  const run = env.AI.run;
+  env.AI.run = (model, payload) => ({
+    ...run(model, payload),
+    choices: [{ message: { content: "MTG_ANSWER: **Beurt 2** kan __één__ spell van twee mana betalen." } }],
+  });
+  const input = {
+    ...deckQuestion,
+    question: "Wat zegt mijn manacurve over mijn eerste drie beurten? Kun je uit die cijfers ook afleiden of ik op beurt twee zowel witte als zwarte mana heb?",
+  };
+  const result = await (await handler.fetch(ask(input), env)).json();
+  assert.equal(result.text, "Beurt 2 kan één spell van twee mana betalen.");
+  const [system] = seen.infer[0][1].messages;
+  assert.match(system.content, /turn 2 gives 2 .*turn 3 gives 3/);
+  assert.match(system.content, /never cumulative mana available on one turn/);
+  assert.match(system.content, /one white and one black mana/);
+  assert.match(system.content, /Never infer mana colors from the curve/);
+});
