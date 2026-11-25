@@ -371,6 +371,7 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.ORACLE) {
                         OracleChatScreen(
                             viewModel = oracleViewModel,
+                            collections = vaultViewModel.collections,
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                         )
                     }

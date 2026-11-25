@@ -6,7 +6,9 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,6 +21,8 @@ import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
 import com.example.data.local.LatticeDatabase
+import com.example.data.local.VaultCollectionCard
+import com.example.data.local.VaultCollectionEntry
 import com.example.data.remote.ScryfallApi
 import com.example.data.remote.ScryfallCardDto
 import com.example.data.remote.ScryfallRulingsResponse
@@ -32,6 +36,7 @@ import com.example.ui.screens.OracleChatScreen
 import com.example.ui.theme.LatticeMtgTheme
 import com.example.ui.viewmodel.OracleChatViewModel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -205,9 +210,15 @@ class Step4OracleContextTest {
                 preferencesRepository = PreferencesRepository(context)
             )
 
+            val ownedCandidate = cards[3].copy(legalFormats = "Standard")
+            val collection = MutableStateFlow(mapOf(
+                "Test inventory" to listOf(
+                    VaultCollectionCard(VaultCollectionEntry("Test inventory", ownedCandidate.id, 2), ownedCandidate)
+                )
+            ))
             composeRule.setContent {
                 LatticeMtgTheme {
-                    OracleChatScreen(viewModel = vm, onOpenSettings = {})
+                    OracleChatScreen(viewModel = vm, onOpenSettings = {}, collections = collection)
                 }
             }
 
@@ -225,6 +236,19 @@ class Step4OracleContextTest {
                 composeRule.onNodeWithText("MTG question").assertIsDisplayed()
                 composeRule.onNodeWithText("Close").performClick()
                 composeRule.onNodeWithText("Explain deck check · Preview").assertIsDisplayed()
+                composeRule.onNodeWithText("Kandidaten uit mijn collectie").performClick()
+                composeRule.onNodeWithText("Test inventory").performClick()
+                composeRule.onNodeWithText("Kies een referentiekaart").performScrollTo().performClick()
+                composeRule.waitUntil(5_000) {
+                    composeRule.onAllNodesWithText(cards[0].name).fetchSemanticsNodes().isNotEmpty()
+                }
+                composeRule.onNodeWithText(cards[0].name).performClick()
+                composeRule.onNodeWithText("Toon kandidaten").performClick()
+                composeRule.waitUntil(5_000) {
+                    composeRule.onAllNodesWithText(ownedCandidate.name).fetchSemanticsNodes().isNotEmpty()
+                }
+                composeRule.onNodeWithText(ownedCandidate.name).assertIsDisplayed()
+                composeRule.onNodeWithText("2 in collectie buiten dit deck").performScrollTo().assertIsDisplayed()
                 return
             }
 

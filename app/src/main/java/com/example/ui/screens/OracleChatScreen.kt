@@ -66,6 +66,8 @@ import com.example.R
 import com.example.BuildConfig
 import com.example.ai.OracleQuestionTarget
 import com.example.data.local.DeckWithEntries
+import com.example.data.local.VaultCollectionCard
+import kotlinx.coroutines.flow.StateFlow
 import com.example.data.local.ChatMessageEntity
 import com.example.ui.viewmodel.OracleChatViewModel
 import com.example.ui.viewmodel.OracleReplyState
@@ -81,7 +83,8 @@ private val starterMtgPrompts = listOf(
 fun OracleChatScreen(
     viewModel: OracleChatViewModel,
     onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    collections: StateFlow<Map<String, List<VaultCollectionCard>>>? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     if (BuildConfig.ORACLE_DECK_PREVIEW) {
@@ -91,7 +94,8 @@ fun OracleChatScreen(
             selectDeck = { viewModel.selectContextDeck(it) },
             online = uiState.isOnline && !uiState.offlineOnlyMode,
             onOpenSettings = onOpenSettings,
-            modifier = modifier
+            modifier = modifier,
+            collections = collections
         )
         return
     }
@@ -548,8 +552,15 @@ private fun OraclePreviewScreen(
     selectDeck: (Long) -> Unit,
     online: Boolean,
     onOpenSettings: () -> Unit,
-    modifier: Modifier
+    modifier: Modifier,
+    collections: StateFlow<Map<String, List<VaultCollectionCard>>>?
 ) {
+    var ownedCandidatesDeck by remember { mutableStateOf<DeckWithEntries?>(null) }
+    val candidatesDeck = ownedCandidatesDeck
+    if (candidatesDeck != null && collections != null) {
+        val inventory by collections.collectAsStateWithLifecycle()
+        OracleOwnedCandidatesDialog(candidatesDeck, inventory, onDismiss = { ownedCandidatesDeck = null })
+    }
     var questionDeck by remember { mutableStateOf<DeckWithEntries?>(null) }
     var explanationDeck by remember { mutableStateOf<DeckWithEntries?>(null) }
     questionDeck?.let { deck ->
@@ -590,6 +601,12 @@ private fun OraclePreviewScreen(
         }
         if (selectedDeck != null) {
             AssistChip(onClick = { questionDeck = selectedDeck }, label = { Text("Ask about this deck") })
+            if (collections != null) {
+                AssistChip(
+                    onClick = { ownedCandidatesDeck = selectedDeck },
+                    label = { Text("Kandidaten uit mijn collectie") }
+                )
+            }
             AssistChip(onClick = { explanationDeck = selectedDeck }, label = { Text("Explain deck check · Preview") })
         }
         Text("For a card question, open the card and choose Ask about this card.")

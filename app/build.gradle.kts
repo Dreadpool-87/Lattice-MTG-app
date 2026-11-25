@@ -57,10 +57,10 @@ android {
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
       if (oracleDeckPreview) {
-        applicationIdSuffix = ".oraclequestions"
-        versionNameSuffix = "-oracle-questions-preview"
+        applicationIdSuffix = ".oraclecollection"
+        versionNameSuffix = "-oracle-collection-preview"
         buildConfigField("boolean", "ORACLE_DECK_PREVIEW", "true")
-        resValue("string", "app_name", "Lattice Oracle Questions")
+        resValue("string", "app_name", "Lattice Oracle Collection")
       }
     }
   }
