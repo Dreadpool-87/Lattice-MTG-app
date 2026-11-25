@@ -216,6 +216,18 @@ class Step4OracleContextTest {
                 vm.uiState.value.decks.size == 2 && vm.uiState.value.messages.isNotEmpty()
             }
 
+            if (BuildConfig.ORACLE_DECK_PREVIEW) {
+                composeRule.onNodeWithText("General MTG").assertDoesNotExist()
+                composeRule.onNodeWithTag("oracle_bubble_partial_notice").assertDoesNotExist()
+                composeRule.onNodeWithTag("oracle_context_deck_$completeDeckId").performClick()
+                composeRule.onNodeWithText("Ask about this deck").performClick()
+                composeRule.onNodeWithText("Small Complete Deck").assertIsDisplayed()
+                composeRule.onNodeWithText("MTG question").assertIsDisplayed()
+                composeRule.onNodeWithText("Close").performClick()
+                composeRule.onNodeWithText("Explain deck check · Preview").assertIsDisplayed()
+                return
+            }
+
             // Prior partial reply renders its partial-context disclaimer inside the bubble
             composeRule.onNodeWithTag("oracle_bubble_partial_notice")
                 .assertIsDisplayed()

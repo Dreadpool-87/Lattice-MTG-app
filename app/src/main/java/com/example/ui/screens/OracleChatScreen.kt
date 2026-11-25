@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.BuildConfig
+import com.example.ai.OracleQuestionTarget
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.ChatMessageEntity
 import com.example.ui.viewmodel.OracleChatViewModel
@@ -83,17 +84,19 @@ fun OracleChatScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var inputText by remember { mutableStateOf("") }
-    var deckExplanation by remember { mutableStateOf<DeckWithEntries?>(null) }
-    val listState = rememberLazyListState()
-
-    deckExplanation?.let { deck ->
-        OracleDeckExplanationDialog(
-            deck = deck,
+    if (BuildConfig.ORACLE_DECK_PREVIEW) {
+        OraclePreviewScreen(
+            decks = uiState.decks,
+            selectedDeck = uiState.selectedContextDeck,
+            selectDeck = { viewModel.selectContextDeck(it) },
             online = uiState.isOnline && !uiState.offlineOnlyMode,
-            onDismiss = { deckExplanation = null }
+            onOpenSettings = onOpenSettings,
+            modifier = modifier
         )
+        return
     }
+    var inputText by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
 
     LaunchedEffect(uiState.messages.size, uiState.replyState) {
         val totalItems = uiState.messages.size + if (uiState.replyState is OracleReplyState.Streaming) 1 else 0
@@ -336,17 +339,6 @@ fun OracleChatScreen(
                     }
                 }
 
-                if (BuildConfig.ORACLE_DECK_PREVIEW) {
-                    uiState.selectedContextDeck?.let { deck ->
-                        item(key = "oracle_deck_explanation") {
-                            AssistChip(
-                                onClick = { deckExplanation = deck },
-                                label = { Text("Explain deck check · Preview") }
-                            )
-                        }
-                    }
-                }
-
                 items(uiState.messages, key = { it.id }) { msg ->
                     ChatBubble(message = msg)
                 }
@@ -546,5 +538,60 @@ private fun ChatBubble(message: ChatMessageEntity) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun OraclePreviewScreen(
+    decks: List<DeckWithEntries>,
+    selectedDeck: DeckWithEntries?,
+    selectDeck: (Long) -> Unit,
+    online: Boolean,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier
+) {
+    var questionDeck by remember { mutableStateOf<DeckWithEntries?>(null) }
+    var explanationDeck by remember { mutableStateOf<DeckWithEntries?>(null) }
+    questionDeck?.let { deck ->
+        OracleDeckExplanationDialog(
+            online = online,
+            onDismiss = { questionDeck = null },
+            questionTarget = OracleQuestionTarget.Deck(deck)
+        )
+    }
+    explanationDeck?.let { deck ->
+        OracleDeckExplanationDialog(online = online, onDismiss = { explanationDeck = null }, deck = deck)
+    }
+    Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(R.string.oracle_title), style = MaterialTheme.typography.headlineSmall)
+            IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("open_settings_button_oracle")) {
+                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.action_open_settings))
+            }
+        }
+        Text(if (decks.isEmpty()) "Create or import a deck first." else "Select the deck you want to ask about.")
+        if (!online) Text("An internet connection and online mode are required to ask Oracle.")
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            decks.forEach { deck ->
+                FilterChip(
+                    selected = selectedDeck?.deck?.id == deck.deck.id,
+                    onClick = { selectDeck(deck.deck.id) },
+                    label = { Text("${deck.deck.name} (${deck.deck.format})") },
+                    modifier = Modifier.testTag("oracle_context_deck_${deck.deck.id}")
+                )
+            }
+        }
+        if (selectedDeck != null) {
+            AssistChip(onClick = { questionDeck = selectedDeck }, label = { Text("Ask about this deck") })
+            AssistChip(onClick = { explanationDeck = selectedDeck }, label = { Text("Explain deck check · Preview") })
+        }
+        Text("For a card question, open the card and choose Ask about this card.")
     }
 }

@@ -77,6 +77,9 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import com.example.BuildConfig
+import com.example.ai.OracleQuestionTarget
+import com.example.ui.screens.OracleDeckExplanationDialog
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
 import com.example.data.repository.ArtworkSide
@@ -110,6 +113,7 @@ fun CardInspectorSheet(
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val scrollState = remember(card.id) { ScrollState(0) }
     var page by remember(card.id) { mutableStateOf(CardInspectorPage.DETAILS) }
+    var askingOracle by remember(card.id) { mutableStateOf(false) }
     val backToDetails = { page = CardInspectorPage.DETAILS }
 
     val decodedFaces = remember(card.cardFacesJson) {
@@ -243,6 +247,21 @@ fun CardInspectorSheet(
                 modifier = Modifier.fillMaxWidth().testTag("sheet_open_rulings")
             ) {
                 Text("Official Rulings (${effectiveRulings.size})")
+            }
+            if (BuildConfig.ORACLE_DECK_PREVIEW) {
+                OutlinedButton(
+                    onClick = { askingOracle = true },
+                    modifier = Modifier.fillMaxWidth().testTag("ask_about_card")
+                ) {
+                    Text("Ask about this card")
+                }
+                if (askingOracle) {
+                    OracleDeckExplanationDialog(
+                        online = isOnline,
+                        onDismiss = { askingOracle = false },
+                        questionTarget = OracleQuestionTarget.Card(card, decodedFaces, effectiveRulings)
+                    )
+                }
             }
             if (onAddToDeck != null && decks.isNotEmpty()) {
                 OutlinedButton(

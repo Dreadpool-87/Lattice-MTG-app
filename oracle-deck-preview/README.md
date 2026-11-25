@@ -1,7 +1,7 @@
 # Oracle deck explanation preview
 
 Build the separate debug app with `gradle -PoracleDeckPreview=true :app:assembleDebug`.
-Its application ID ends in `.oraclepreview`. The regular Android builds and Firebase
+Its application ID ends in `.oraclequestions` and installs alongside the earlier Oracle preview. The regular Android builds and Firebase
 chat use their existing configuration.
 
 With a deck selected in Oracle, choose **Explain deck check · Preview**. Enter a
@@ -10,6 +10,13 @@ the dialog is open. The app sends only a model choice, counts and local check
 statuses. It does not send deck or card names or chat history. Commander color
 identity compares cached symbols against the selected commanders and is a
 partial check.
+
+**Ask about this deck** uses the selected mainboard and commanders, local
+statistics, and one question. **Ask about this card** uses the open card's
+cached rules text, faces and available rulings. The UI discloses the fields
+sent to Cloudflare. Each question is independent. The Worker requires a deck
+or card context and instructs the model to refuse unrelated questions. This
+model-based topic check is not a guarantee against prompt injection.
 
 The Worker requires an `AI` binding, a SQLite-backed `BUDGET` Durable Object
 binding for `PreviewBudget`, and a `PREVIEW_CODE` secret. Its allowance is 24

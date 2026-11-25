@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.example.ai.OracleDeckExplanation
 import com.example.ai.OracleDeckPreviewClient
 import com.example.ai.OraclePreviewModel
+import com.example.ai.OracleQuestionTarget
 import com.example.data.local.DeckWithEntries
 import com.example.domain.OracleDeckCheck
 import java.io.IOException
@@ -31,13 +32,15 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun OracleDeckExplanationDialog(
-    deck: DeckWithEntries,
     online: Boolean,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    deck: DeckWithEntries? = null,
+    questionTarget: OracleQuestionTarget? = null
 ) {
-    val check = remember(deck) { OracleDeckCheck.analyze(deck) }
+    val check = remember(deck) { deck?.let { OracleDeckCheck.analyze(it) } }
     val scope = rememberCoroutineScope()
-    var model by remember { mutableStateOf(OraclePreviewModel.STANDARD) }
+    var model by remember { mutableStateOf(if (questionTarget == null) OraclePreviewModel.STANDARD else OraclePreviewModel.ECONOMY) }
+    var question by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<OracleDeckExplanation?>(null) }
@@ -45,20 +48,37 @@ internal fun OracleDeckExplanationDialog(
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Explain deck check") },
+        title = { Text(if (questionTarget == null) "Explain deck check" else "Ask Oracle") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("${check.cards} playable cards · ${check.lands} lands")
-                if (check.copyWarning) Text("The local check flagged a copy limit.")
-                when (check.identity) {
-                    "flagged" -> Text("Outside commander color identity: ${check.offColorNames.joinToString()}")
-                    "incomplete" -> Text("Commander color identity could not be fully checked.")
-                    "no_mismatch" -> Text("No cached color-identity mismatch found in the mainboard.")
+                if (questionTarget != null) {
+                    Text(questionTarget.title)
+                    val disclosure = when (questionTarget) {
+                        is OracleQuestionTarget.Deck -> "Sends your question, mainboard and commander card names, mana costs and local deck statistics to Cloudflare."
+                        is OracleQuestionTarget.Card -> "Sends your question, this card’s text and available rulings to Cloudflare."
+                    }
+                    Text(disclosure)
+                    OutlinedTextField(
+                        value = question,
+                        onValueChange = { question = it.take(400) },
+                        enabled = !busy,
+                        label = { Text("MTG question") },
+                        minLines = 2,
+                        maxLines = 4
+                    )
+                } else if (check != null) {
+                    Text("${check.cards} playable cards · ${check.lands} lands")
+                    if (check.copyWarning) Text("The local check flagged a copy limit.")
+                    when (check.identity) {
+                        "flagged" -> Text("Outside commander color identity: ${check.offColorNames.joinToString()}")
+                        "incomplete" -> Text("Commander color identity could not be fully checked.")
+                        "no_mismatch" -> Text("No cached color-identity mismatch found in the mainboard.")
+                    }
+                    Text("Sends counts and check results to Cloudflare. Card names and chat history stay on this device.")
                 }
-                Text("Sends counts and check results to Cloudflare. Card names and chat history stay on this device.")
                 if (!online) Text("An internet connection and online mode are required for AI explanations.")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OraclePreviewModel.entries.forEach { option ->
@@ -78,7 +98,7 @@ internal fun OracleDeckExplanationDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true
                 )
-                if (busy) Text("Explaining…")
+                if (busy) Text("Asking Oracle…")
                 result?.let { response ->
                     Text(response.text)
                     val usage = response.neurons?.let { String.format(Locale.ROOT, "%.1f Neurons", it) }
@@ -91,26 +111,31 @@ internal fun OracleDeckExplanationDialog(
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Close") } },
         confirmButton = {
             TextButton(
-                enabled = online && !busy && token.trim().matches(Regex("[A-Za-z0-9_-]{16,80}")),
+                enabled = online && !busy && token.trim().matches(Regex("[A-Za-z0-9_-]{16,80}")) &&
+                    (if (questionTarget == null) check != null else question.isNotBlank()),
                 onClick = {
                     busy = true
                     error = null
                     result = null
                     scope.launch {
                         try {
-                            result = OracleDeckPreviewClient.explain(check, token, model)
+                            result = when {
+                                questionTarget != null -> OracleDeckPreviewClient.ask(questionTarget, question, token, model)
+                                check != null -> OracleDeckPreviewClient.explain(check, token, model)
+                                else -> null
+                            }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: IOException) {
-                            error = e.message ?: "Deck explanation is unavailable."
+                            error = e.message ?: "Oracle preview is unavailable."
                         } catch (_: Exception) {
-                            error = "Deck explanation is unavailable."
+                            error = "Oracle preview is unavailable."
                         } finally {
                             busy = false
                         }
                     }
                 }
-            ) { Text("Explain") }
+            ) { Text(if (questionTarget == null) "Explain" else "Ask") }
         }
     )
 }
