@@ -207,3 +207,24 @@ test("the Guildgate's first ability is entering tapped, not producing mana", asy
   }), env);
   assert.equal(seen.infer.length, 1);
 });
+
+test("explicit card swap requests abstain before invoking a model", async () => {
+  const questions = [
+    "welke kaarten moet ik vervangen voor een beter deck?",
+    "Hoe kan ik mijn deck verbeteren?",
+    "What cards would you cut or add?",
+    "Suggest three budget upgrades for my deck",
+  ];
+  const { env, seen } = fixtures(questions.length + 1);
+  for (const [index, question] of questions.entries()) {
+    const response = await handler.fetch(ask({ ...deckQuestion, question }), env);
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.neurons, 0);
+    assert.match(result.text, index < 2 ? /geverifieerde kaartteksten/ : /verified rules text/);
+  }
+  assert.deepEqual(seen.infer, []);
+  assert.deepEqual(seen.usage, []);
+  await handler.fetch(ask({ ...deckQuestion, question: "Hoe werken replacement effects?" }), env);
+  assert.equal(seen.infer.length, 1);
+});
