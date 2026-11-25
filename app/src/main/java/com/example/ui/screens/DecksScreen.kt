@@ -34,6 +34,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -57,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -74,6 +77,7 @@ import com.example.ui.theme.LocalWubrgTheme
 import com.example.ui.theme.WubrgTheme
 import com.example.ui.theme.WubrgColorStrip
 import com.example.ui.viewmodel.DecksViewModel
+import java.io.IOException
 
 private val deckFormats = listOf("All", "Commander", "Modern", "Standard", "Pioneer", "Pauper", "Casual")
 
@@ -584,6 +588,15 @@ private fun CreateDeckDialog(
     )
 }
 
+private data class PlaytestExample(val name: String, val format: String, val asset: String)
+
+private val playtestExamples = listOf(
+    PlaytestExample("Orzhov Lifegain", "Casual", "Casual-Orzhov-Lifegain.txt"),
+    PlaytestExample("Golgari Midrange", "Casual", "Casual-Golgari-Midrange.txt"),
+    PlaytestExample("Klingon Fury", "Commander", "Commander-Klingon-Fury.txt"),
+    PlaytestExample("Multiverse Reforged", "Commander", "Commander-Multiverse-Reforged.txt")
+)
+
 @Composable
 private fun ImportDeckDialog(
     onDismiss: () -> Unit,
@@ -593,6 +606,9 @@ private fun ImportDeckDialog(
     var name by remember { mutableStateOf("") }
     var format by remember { mutableStateOf("Commander") }
     var rawText by remember { mutableStateOf("") }
+    var showExamples by remember { mutableStateOf(false) }
+    var exampleLoadFailed by remember { mutableStateOf(false) }
+    val assets = LocalContext.current.assets
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -607,6 +623,40 @@ private fun ImportDeckDialog(
                     modifier = Modifier.fillMaxWidth().testTag("open_deck_csv_import")
                 ) {
                     Text("Import CSV file")
+                }
+                Box {
+                    OutlinedButton(
+                        onClick = { showExamples = true },
+                        enabled = rawText.isBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Choose a Playtest example")
+                    }
+                    DropdownMenu(
+                        expanded = showExamples,
+                        onDismissRequest = { showExamples = false }
+                    ) {
+                        playtestExamples.forEach { example ->
+                            DropdownMenuItem(
+                                text = { Text("${example.name} · ${example.format}") },
+                                onClick = {
+                                    showExamples = false
+                                    try {
+                                        rawText = assets.open("playtest-decks/${example.asset}")
+                                            .bufferedReader().use { it.readText() }
+                                        name = example.name
+                                        format = example.format
+                                        exampleLoadFailed = false
+                                    } catch (_: IOException) {
+                                        exampleLoadFailed = true
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                if (exampleLoadFailed) {
+                    Text("Could not load the example deck.", color = MaterialTheme.colorScheme.error)
                 }
                 OutlinedTextField(
                     value = name,
