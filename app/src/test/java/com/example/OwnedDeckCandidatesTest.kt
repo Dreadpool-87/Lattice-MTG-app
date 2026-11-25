@@ -71,32 +71,53 @@ class OwnedDeckCandidatesTest {
     }
 
     @Test
-    fun combinesOverlappingCollectionsAndFiltersColorsWithoutLosingReferenceRanking() {
+    fun combinesOverlappingCollectionsAndFiltersColors() {
         val white = card("White deck card", colors = "W")
         val black = card("Black deck card", colors = "B")
-        val reference = card("Reference", colors = "B", tags = "Tokens")
         val deck = DeckWithEntries(
             DeckEntity(id = 1L, name = "Orzhov deck", format = "Casual"),
-            listOf(entry(white), entry(black), entry(reference))
+            listOf(entry(white), entry(black))
         )
-        val tokenCandidate = card("Z matching", colors = "B", tags = "Tokens")
+        val blackCandidate = card("Black candidate", colors = "B")
         val colorless = card("Colorless", colors = "")
         val pool = listOf(
-            owned(tokenCandidate, 2),
-            owned(tokenCandidate, 3).let { it.copy(entry = it.entry.copy(listName = "Overlap")) },
-            owned(tokenCandidate.copy(id = "Different printing"), 1),
+            owned(blackCandidate, 2),
+            owned(blackCandidate, 3).let { it.copy(entry = it.entry.copy(listName = "Overlap")) },
+            owned(blackCandidate.copy(id = "Different printing"), 1),
             owned(card("White candidate", colors = "W"), 3),
-            owned(card("Black candidate", colors = "B"), 2),
-            owned(reference, 2),
             owned(colorless)
         )
-        val results = OwnedDeckCandidates.find(deck, pool, setOf("B"), includeColorless = false, reference = reference)
-        assertEquals(listOf("Z matching", "Black candidate"), results.map { it.card.name })
+        val results = OwnedDeckCandidates.find(deck, pool, setOf("B"), includeColorless = false)
+        assertEquals(listOf("Black candidate"), results.map { it.card.name })
         assertEquals(4L, results.first().availableCopies)
-        assertEquals(listOf("Tokens"), results.first().referenceTags)
         assertEquals(
             listOf("Colorless"),
             OwnedDeckCandidates.find(deck, pool, emptySet(), includeColorless = true).map { it.card.name }
         )
+    }
+
+    @Test
+    fun choosesAOneCardSwapWithNoReferenceEvenWhenCommanderColorsAreMissing() {
+        val anchor = card("Life engine", tags = "Lifegain")
+        val cut = card("Low synergy")
+            .copy(synergyTags = "Tokens", oracleText = "When this creature enters, create a token.")
+        val removal = card("Removal creature", tags = "Removal")
+        val legal = card("Owned upgrade", tags = "Lifegain").copy(cmc = 1.0)
+        val pool = listOf(
+            owned(legal),
+            owned(card("Off color", colors = "R").copy(cmc = 1.0)),
+            owned(card("Too costly").copy(cmc = 4.0)),
+            owned(card("Wrong type").copy(typeLine = "Enchantment"))
+        )
+        val deck = DeckWithEntries(
+            DeckEntity(id = 1L, name = "Orzhov deck", format = "Commander"),
+            listOf(entry(anchor), entry(cut), entry(removal))
+        )
+        assertEquals(null, OwnedDeckCandidates.deckColors(deck))
+        val swap = requireNotNull(OwnedDeckCandidates.bestSwap(deck, pool, setOf("W", "B"), true))
+        assertEquals(cut.name, swap.remove.name)
+        assertEquals(legal.name, swap.add.card.name)
+        assertEquals(listOf("Lifegain"), swap.additionalTags)
+        assertEquals(null, OwnedDeckCandidates.bestSwap(deck, pool, setOf("G"), false))
     }
 }

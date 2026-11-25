@@ -18,7 +18,7 @@ android {
     applicationId = "com.aistudio.latticemtg.k7m2px"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
+    versionCode = if (oracleDeckPreview) 5 else 4
     versionName = "1.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

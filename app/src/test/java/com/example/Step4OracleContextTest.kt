@@ -157,7 +157,11 @@ class Step4OracleContextTest {
             .build()
 
         try {
-            val cards = (1..40).map { dummyCard(it) }
+            val cards = (1..40).map { index ->
+                dummyCard(index).let { card ->
+                    if (index == 2) card.copy(synergyTags = "Card Draw") else card
+                }
+            }
             val completeDeckId: Long
             val partialDeckId: Long
             runBlocking {
@@ -210,7 +214,7 @@ class Step4OracleContextTest {
                 preferencesRepository = PreferencesRepository(context)
             )
 
-            val ownedCandidate = cards[3].copy(legalFormats = "Standard")
+            val ownedCandidate = cards[3].copy(legalFormats = "Standard", synergyTags = "Card Draw", cmc = 1.0)
             val collection = MutableStateFlow(mapOf(
                 "Test inventory" to listOf(
                     VaultCollectionCard(VaultCollectionEntry("Test inventory", ownedCandidate.id, 2), ownedCandidate)
@@ -236,19 +240,20 @@ class Step4OracleContextTest {
                 composeRule.onNodeWithText("MTG question").assertIsDisplayed()
                 composeRule.onNodeWithText("Close").performClick()
                 composeRule.onNodeWithText("Explain deck check · Preview").assertIsDisplayed()
-                composeRule.onNodeWithText("Kandidaten uit mijn collectie").performClick()
+                composeRule.onNodeWithText("Card").performClick()
+                composeRule.onNodeWithText("Browse cards").assertIsDisplayed()
+                composeRule.onNodeWithText("Collection").performClick()
+                composeRule.onNodeWithText("Open collections").assertIsDisplayed()
+                composeRule.onNodeWithText("Deck").performClick()
+                composeRule.onNodeWithText("Find a replacement").performClick()
                 composeRule.onNodeWithText("Test inventory").performClick()
-                composeRule.onNodeWithText("Kies een referentiekaart").performScrollTo().performClick()
+                composeRule.onNodeWithText("Find replacement").performClick()
                 composeRule.waitUntil(5_000) {
-                    composeRule.onAllNodesWithText(cards[0].name).fetchSemanticsNodes().isNotEmpty()
+                    composeRule.onAllNodesWithText("Add one: ${ownedCandidate.name}").fetchSemanticsNodes().isNotEmpty()
                 }
-                composeRule.onNodeWithText(cards[0].name).performClick()
-                composeRule.onNodeWithText("Toon kandidaten").performClick()
-                composeRule.waitUntil(5_000) {
-                    composeRule.onAllNodesWithText(ownedCandidate.name).fetchSemanticsNodes().isNotEmpty()
-                }
-                composeRule.onNodeWithText(ownedCandidate.name).assertIsDisplayed()
-                composeRule.onNodeWithText("2 in collectie buiten dit deck").performScrollTo().assertIsDisplayed()
+                composeRule.onNodeWithText("Remove one: ${cards[0].name}").assertIsDisplayed()
+                composeRule.onNodeWithText("Add one: ${ownedCandidate.name}").assertIsDisplayed()
+                composeRule.onNodeWithText("2 owned outside this deck").performScrollTo().assertIsDisplayed()
                 return
             }
 

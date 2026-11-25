@@ -19,12 +19,14 @@ sent to Cloudflare. Each question is independent. The Worker requires a deck
 or card context and instructs the model to refuse unrelated questions. This
 model-based topic check is not a guarantee against prompt injection.
 
-**Kandidaten uit mijn collectie** searches the selected Vault collections on the
-device. For a printing shared by several collections, it uses the largest
-recorded quantity. It subtracts copies used in the active deck across printings,
-filters by the selected color identities and cached format data, and ranks
-matches using the deck and an optional reference card from the deck or collection.
-It does not send collection data to Cloudflare or change the deck.
+Oracle has three contexts: **Card**, **Deck**, and **Collection**. In Deck,
+**Find a replacement** searches the selected Vault collections on the device.
+Per printing it uses the highest quantity from overlapping collections and
+subtracts copies used in this deck. It searches all eligible owned candidates
+and suggests a one-card swap when it finds stronger tag support at the same
+or lower mana value and with the same card types. Users can select colors if
+the deck's identity is unverified. The shortlist uses cached metadata and
+does not assert whole-deck legality.
 
 The Worker requires an `AI` binding, a SQLite-backed `BUDGET` Durable Object
 binding for `PreviewBudget`, and a `PREVIEW_CODE` secret. Its allowance is 24

@@ -84,7 +84,9 @@ fun OracleChatScreen(
     viewModel: OracleChatViewModel,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    collections: StateFlow<Map<String, List<VaultCollectionCard>>>? = null
+    collections: StateFlow<Map<String, List<VaultCollectionCard>>>? = null,
+    onBrowseCards: () -> Unit = {},
+    onOpenCollections: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     if (BuildConfig.ORACLE_DECK_PREVIEW) {
@@ -95,7 +97,9 @@ fun OracleChatScreen(
             online = uiState.isOnline && !uiState.offlineOnlyMode,
             onOpenSettings = onOpenSettings,
             modifier = modifier,
-            collections = collections
+            collections = collections,
+            onBrowseCards = onBrowseCards,
+            onOpenCollections = onOpenCollections
         )
         return
     }
@@ -545,6 +549,8 @@ private fun ChatBubble(message: ChatMessageEntity) {
     }
 }
 
+private enum class OraclePreviewContext { Card, Deck, Collection }
+
 @Composable
 private fun OraclePreviewScreen(
     decks: List<DeckWithEntries>,
@@ -553,8 +559,11 @@ private fun OraclePreviewScreen(
     online: Boolean,
     onOpenSettings: () -> Unit,
     modifier: Modifier,
-    collections: StateFlow<Map<String, List<VaultCollectionCard>>>?
+    collections: StateFlow<Map<String, List<VaultCollectionCard>>>?,
+    onBrowseCards: () -> Unit,
+    onOpenCollections: () -> Unit
 ) {
+    var context by remember { mutableStateOf(OraclePreviewContext.Deck) }
     var ownedCandidatesDeck by remember { mutableStateOf<DeckWithEntries?>(null) }
     val candidatesDeck = ownedCandidatesDeck
     if (candidatesDeck != null && collections != null) {
@@ -584,31 +593,49 @@ private fun OraclePreviewScreen(
                 Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.action_open_settings))
             }
         }
-        Text(if (decks.isEmpty()) "Create or import a deck first." else "Select the deck you want to ask about.")
-        if (!online) Text("An internet connection and online mode are required to ask Oracle.")
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            decks.forEach { deck ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OraclePreviewContext.entries.forEach { target ->
                 FilterChip(
-                    selected = selectedDeck?.deck?.id == deck.deck.id,
-                    onClick = { selectDeck(deck.deck.id) },
-                    label = { Text("${deck.deck.name} (${deck.deck.format})") },
-                    modifier = Modifier.testTag("oracle_context_deck_${deck.deck.id}")
+                    selected = context == target,
+                    onClick = { context = target },
+                    label = { Text(target.name) }
                 )
             }
         }
-        if (selectedDeck != null) {
-            AssistChip(onClick = { questionDeck = selectedDeck }, label = { Text("Ask about this deck") })
-            if (collections != null) {
-                AssistChip(
-                    onClick = { ownedCandidatesDeck = selectedDeck },
-                    label = { Text("Kandidaten uit mijn collectie") }
-                )
+        when (context) {
+            OraclePreviewContext.Card -> {
+                AssistChip(onClick = onBrowseCards, label = { Text("Browse cards") })
+                Text("Open a card and choose Ask about this card.")
             }
-            AssistChip(onClick = { explanationDeck = selectedDeck }, label = { Text("Explain deck check · Preview") })
+            OraclePreviewContext.Collection -> {
+                AssistChip(onClick = onOpenCollections, label = { Text("Open collections") })
+            }
+            OraclePreviewContext.Deck -> {
+                Text(if (decks.isEmpty()) "Create or import a deck first." else "Select a deck.")
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    decks.forEach { deck ->
+                        FilterChip(
+                            selected = selectedDeck?.deck?.id == deck.deck.id,
+                            onClick = { selectDeck(deck.deck.id) },
+                            label = { Text("${deck.deck.name} (${deck.deck.format})") },
+                            modifier = Modifier.testTag("oracle_context_deck_${deck.deck.id}")
+                        )
+                    }
+                }
+                if (selectedDeck != null) {
+                    AssistChip(onClick = { questionDeck = selectedDeck }, label = { Text("Ask about this deck") })
+                    if (collections != null) {
+                        AssistChip(
+                            onClick = { ownedCandidatesDeck = selectedDeck },
+                            label = { Text("Find a replacement") }
+                        )
+                    }
+                    AssistChip(onClick = { explanationDeck = selectedDeck }, label = { Text("Explain deck check · Preview") })
+                }
+            }
         }
-        Text("For a card question, open the card and choose Ask about this card.")
     }
 }

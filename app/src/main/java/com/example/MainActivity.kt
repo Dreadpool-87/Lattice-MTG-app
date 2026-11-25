@@ -372,6 +372,8 @@ fun LatticeRootApp(container: AppContainer) {
                         OracleChatScreen(
                             viewModel = oracleViewModel,
                             collections = vaultViewModel.collections,
+                            onBrowseCards = { navController.navigate(Routes.VAULT_CATALOG) },
+                            onOpenCollections = { navController.navigate(Routes.VAULT) },
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                         )
                     }

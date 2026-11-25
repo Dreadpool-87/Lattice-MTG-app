@@ -9,8 +9,13 @@ import com.example.data.local.VaultCollectionCard
 internal data class OwnedDeckCandidate(
     val card: CardEntity,
     val availableCopies: Long,
-    val sharedTags: List<String>,
-    val referenceTags: List<String>
+    val sharedTags: List<String>
+)
+
+internal data class OwnedDeckSwap(
+    val remove: CardEntity,
+    val add: OwnedDeckCandidate,
+    val additionalTags: List<String>
 )
 
 internal object OwnedDeckCandidates {
@@ -26,21 +31,66 @@ internal object OwnedDeckCandidates {
         return sources.flatMap { it.card.identity() }.toSet()
     }
 
+    fun provisionalColors(deck: DeckWithEntries): Set<String> =
+        (deck.commanderEntries + deck.mainboardEntries)
+            .filter { it.card.hasVerifiedIdentity() }.flatMap { it.card.identity() }.toSet()
+
+    fun bestSwap(
+        deck: DeckWithEntries,
+        inventory: List<VaultCollectionCard>,
+        colors: Set<String>,
+        includeColorless: Boolean
+    ): OwnedDeckSwap? {
+        val cuts = deck.mainboardEntries.asSequence()
+            .filter { it.entry.quantity > 0 && it.card.hasVerifiedIdentity() }
+            .map { it.card }
+            .filter { "Land" !in it.mainTypes() && it.oracleText.isNotBlank() && it.cmc.isFinite() }
+            .distinctBy { it.oracleId }
+            .toList()
+        val active = (deck.commanderEntries + deck.mainboardEntries)
+            .map { it.card }.filter { it.hasVerifiedIdentity() }.distinctBy { it.oracleId }
+        val protectionTags = setOf("removal", "ramp", "card draw", "board wipe", "protection", "recursion", "countermagic")
+        val additions = find(deck, inventory, colors, includeColorless)
+
+        val choices = cuts.flatMap { cut ->
+            val support = active.filter { it.oracleId != cut.oracleId }.flatMap { it.tags() }
+                .groupingBy { it }.eachCount()
+            val cutTags = cut.tags()
+            val protected = cutTags.filter { it.lowercase() in protectionTags }
+            additions.mapNotNull { add ->
+                val replacement = add.card
+                val addTags = replacement.tags()
+                if (replacement.oracleId == cut.oracleId || replacement.oracleText.isBlank() ||
+                    !replacement.cmc.isFinite() || replacement.cmc > cut.cmc ||
+                    replacement.mainTypes() != cut.mainTypes() || !addTags.containsAll(protected)) {
+                    return@mapNotNull null
+                }
+                val extra = (addTags - cutTags).filter { it in support }.sorted()
+                val gain = addTags.sumOf { support[it] ?: 0 } - cutTags.sumOf { support[it] ?: 0 }
+                if (gain <= 0 || extra.isEmpty()) null else OwnedDeckSwap(cut, add, extra) to gain
+            }
+        }
+        return choices.sortedWith(
+            compareByDescending<Pair<OwnedDeckSwap, Int>> { it.second }
+                .thenBy { it.first.add.card.cmc }
+                .thenBy { it.first.add.card.name }
+                .thenBy { it.first.remove.name }
+        ).firstOrNull()?.first
+    }
+
     fun find(
         deck: DeckWithEntries,
         inventory: List<VaultCollectionCard>,
         colorFilter: Set<String>? = null,
-        includeColorless: Boolean = true,
-        reference: CardEntity? = null
+        includeColorless: Boolean = true
     ): List<OwnedDeckCandidate> {
         val playable = deck.commanderEntries + deck.mainboardEntries
         val format = deck.deck.format.trim()
-        val allowedColors = deckColors(deck) ?: return emptyList()
+        val allowedColors = deckColors(deck) ?: colorFilter?.intersect(magicColors) ?: return emptyList()
         if (format.isEmpty()) return emptyList()
         val commander = format.equals("Commander", ignoreCase = true)
         val copyLimit = if (commander) 1L else 4L
         val selectedColors = colorFilter?.intersect(allowedColors) ?: allowedColors
-        val referenceTags = reference?.tags().orEmpty()
 
         val used = deck.entries.filter { it.entry.zone != DeckZones.MAYBEBOARD && it.entry.quantity > 0 }
         val usedById = used.filter { it.card.oracleId.isNotBlank() }.groupingBy { it.card.oracleId }
@@ -60,7 +110,6 @@ internal object OwnedDeckCandidates {
             .values
             .mapNotNull { printings ->
                 val card = printings.first().card
-                if (reference != null && card.oracleId == reference.oracleId) return@mapNotNull null
                 val identity = card.identity()
                 if (!selectedColors.containsAll(identity) || (identity.isEmpty() && !includeColorless)) {
                     return@mapNotNull null
@@ -76,18 +125,21 @@ internal object OwnedDeckCandidates {
                 if (available <= 0) return@mapNotNull null
                 val tags = card.tags()
                 OwnedDeckCandidate(
-                    card, available, tags.filter { it in tagCounts }.sorted(), tags.intersect(referenceTags).sorted()
+                    card, available, tags.filter { it in tagCounts }.sorted()
                 )
             }
             .sortedWith(
-                compareByDescending<OwnedDeckCandidate> { it.referenceTags.size }
-                    .thenByDescending { match -> match.sharedTags.sumOf { tagCounts.getValue(it) } }
+                compareByDescending<OwnedDeckCandidate> { match -> match.sharedTags.sumOf { tagCounts.getValue(it) } }
                     .thenBy { it.card.name.lowercase() }
                     .thenBy { it.card.oracleId }
             )
-            .take(12)
             .toList()
     }
+
+    private fun CardEntity.mainTypes(): Set<String> =
+        typeLine.substringBefore('—').split(' ').filter { it in cardTypes }.toSet()
+
+    private val cardTypes = setOf("Artifact", "Battle", "Creature", "Enchantment", "Instant", "Kindred", "Land", "Planeswalker", "Sorcery")
 
     private fun CardEntity.hasVerifiedIdentity(): Boolean =
         !isCustom && metadataStatus == CardMetadataStatus.VERIFIED && oracleId.isNotBlank() &&
