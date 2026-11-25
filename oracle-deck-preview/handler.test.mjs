@@ -182,3 +182,28 @@ test("the Dutch early-curve question uses deck data and no model call", async ()
   await handler.fetch(ask({ ...input, question: input.question + " Geef ook een pastarecept." }), env);
   assert.equal(seen.infer.length, 1);
 });
+
+test("the Guildgate's first ability is entering tapped, not producing mana", async () => {
+  const input = {
+    ...cardQuestion,
+    context: {
+      name: "Orzhov Guildgate",
+      text: "Land — Gate\n\nThis land enters tapped.\n{T}: Add {W} or {B}.\nA Gate is not a basic land type.",
+    },
+    question: "Welke kaart heb ik open en wat doet haar eerste ability?",
+  };
+  const { env, seen } = fixtures(2);
+  const response = await handler.fetch(ask(input), env);
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(result.text, /Orzhov Guildgate/);
+  assert.match(result.text, /eerste ability zorgt ervoor dat dit land getapt op het speelveld komt/);
+  assert.equal(result.neurons, 0);
+  assert.deepEqual(seen.infer, []);
+
+  await handler.fetch(ask({
+    ...input,
+    context: { ...input.context, text: "Land — Gate\n\n{T}: Add {W} or {B}.\nThis land enters tapped." },
+  }), env);
+  assert.equal(seen.infer.length, 1);
+});
