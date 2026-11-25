@@ -44,7 +44,8 @@ class ExampleRobolectricTest {
     fun `read app name from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
-        assertEquals("Lattice MTG", appName)
+        val expectedName = if (BuildConfig.ORACLE_DECK_PREVIEW) "Lattice Oracle Preview" else "Lattice MTG"
+        assertEquals(expectedName, appName)
     }
 
     @Test
