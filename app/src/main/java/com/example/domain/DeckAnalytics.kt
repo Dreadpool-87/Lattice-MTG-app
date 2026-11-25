@@ -1,6 +1,7 @@
 package com.example.domain
 
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
@@ -38,7 +39,11 @@ data class DeckAnalyticsSummary(
     val synergyConnections: List<SynergyConnection>,
     val validationNotes: List<ValidationNote>,
     val openingLandOdds7: Double,
-    val turn3Land3Odds: Double
+    val turn3Land3Odds: Double,
+    val turn3Land3OnDrawOdds: Double = 0.0,
+    val drawLibrarySize: Int = 0,
+    val drawLibraryLands: Int = 0,
+    val unresolvedDrawCards: Int = 0
 )
 
 object DeckAnalytics {
@@ -54,6 +59,7 @@ object DeckAnalytics {
 
         var landCount = 0
         var nonLandCount = 0
+        var knownNonLandCount = 0
         var cmcSum = 0.0
         val curve = mutableMapOf(0 to 0, 1 to 0, 2 to 0, 3 to 0, 4 to 0, 5 to 0, 6 to 0)
         val pips = mutableMapOf("W" to 0, "U" to 0, "B" to 0, "R" to 0, "G" to 0, "C" to 0)
@@ -75,13 +81,16 @@ object DeckAnalytics {
             val typeLower = card.typeLine.lowercase()
 
             when {
-                "land" in typeLower -> {
+                PlaytestMana.isLand(card) -> {
                     landCount += qty
                     types["Land"] = (types["Land"] ?: 0) + qty
                 }
                 else -> {
                     nonLandCount += qty
-                    cmcSum += card.cmc * qty
+                    if (card.metadataStatus != CardMetadataStatus.UNRESOLVED) {
+                        knownNonLandCount += qty
+                        cmcSum += card.cmc * qty
+                    }
                     val bucket = card.cmc.toInt().coerceIn(0, 6)
                     curve[bucket] = (curve[bucket] ?: 0) + qty
 
@@ -115,7 +124,7 @@ object DeckAnalytics {
                 }
         }
 
-        val averageCmc = if (nonLandCount > 0) cmcSum / nonLandCount else 0.0
+        val averageCmc = if (knownNonLandCount > 0) cmcSum / knownNonLandCount else 0.0
 
         val clusters = tagToCards.entries
             .map { (tag, list) ->
@@ -142,13 +151,13 @@ object DeckAnalytics {
 
         val validationNotes = validateDeck(deckWithEntries, playable, playableCount, landCount)
 
-        val openingLandOdds7 = if (playableCount >= 7 && landCount > 0) {
-            hypergeometricAtLeastK(playableCount, landCount, 7, 2)
-        } else 0.0
+        val mainboard = deckWithEntries.mainboardEntries
+        val librarySize = mainboard.sumOf { it.entry.quantity }
+        val libraryLands = mainboard.filter { PlaytestMana.isLand(it.card) }.sumOf { it.entry.quantity }
+        val unresolved = mainboard.filter { it.card.metadataStatus == CardMetadataStatus.UNRESOLVED }.sumOf { it.entry.quantity }
 
-        val turn3Land3Odds = if (playableCount >= 9 && landCount > 0) {
-            hypergeometricAtLeastK(playableCount, landCount, 9, 3)
-        } else 0.0
+        fun landOdds(cardsSeen: Int, landsNeeded: Int): Double =
+            if (librarySize >= cardsSeen) hypergeometricAtLeastK(librarySize, libraryLands, cardsSeen, landsNeeded) else 0.0
 
         return DeckAnalyticsSummary(
             playableCount = playableCount,
@@ -162,8 +171,12 @@ object DeckAnalytics {
             synergyClusters = clusters,
             synergyConnections = connections.sortedByDescending { it.sharedCards },
             validationNotes = validationNotes,
-            openingLandOdds7 = openingLandOdds7,
-            turn3Land3Odds = turn3Land3Odds
+            openingLandOdds7 = landOdds(7, 2),
+            turn3Land3Odds = landOdds(9, 3),
+            turn3Land3OnDrawOdds = landOdds(10, 3),
+            drawLibrarySize = librarySize,
+            drawLibraryLands = libraryLands,
+            unresolvedDrawCards = unresolved
         )
     }
 
@@ -408,8 +421,9 @@ object DeckAnalytics {
         draws: Int,
         minHits: Int
     ): Double {
-        if (population <= 0 || draws <= 0 || successes <= 0) return 0.0
-        val n = draws.coerceAtMost(population)
+        if (population < 0 || successes !in 0..population || draws !in 0..population) return 0.0
+        if (minHits <= 0) return 1.0
+        val n = draws
         val kMax = minOf(successes, n)
         if (minHits > kMax) return 0.0
         var totalProb = 0.0
@@ -427,7 +441,8 @@ object DeckAnalytics {
         draws: Int,
         hits: Int
     ): Double {
-        if (hits < 0 || hits > successes || hits > draws || draws - hits > population - successes) {
+        if (population < 0 || successes !in 0..population || draws !in 0..population ||
+            hits !in 0..minOf(successes, draws) || draws - hits > population - successes) {
             return 0.0
         }
         val logP = logChoose(successes, hits) +

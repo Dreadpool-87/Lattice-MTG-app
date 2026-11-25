@@ -102,13 +102,6 @@ private val openSourceLicenses = listOf(
         summary = "Coroutine-backed asynchronous card artwork loading and disk/memory image caching."
     ),
     LicenseEntry(
-        id = "firebase_sdk",
-        library = "Firebase AI Logic & App Check Android SDK",
-        author = "Google LLC",
-        licenseName = "Apache License 2.0",
-        summary = "Provides secure Gemini API inference and reCAPTCHA / debug App Check attestation for Lattice Oracle."
-    ),
-    LicenseEntry(
         id = "sil_fonts",
         library = "Cinzel, Plus Jakarta Sans & JetBrains Mono",
         author = "Natanael Gama • Tokotype • JetBrains",
@@ -265,13 +258,8 @@ fun AboutScreen(
                             )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             CreditRow(
-                                role = "Card Metadata & Oracle Archive",
+                                role = "Card Metadata",
                                 detail = "Scryfall API (scryfall.com) — optional online sync & card artwork"
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            CreditRow(
-                                role = "MTG Rules & Deck Strategist",
-                                detail = "Lattice Oracle powered by Firebase AI Logic & Google App Check"
                             )
                         }
                     }

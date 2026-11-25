@@ -1,6 +1,7 @@
 package com.example.domain
 
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
@@ -54,7 +55,8 @@ data class ArchetypeMatchResult(
     val template: ArchetypeTemplate,
     val matchScore: Int, // 0..100
     val matchedCards: List<String>,
-    val matchedTags: List<String>
+    val matchedTags: List<String>,
+    val matchedBenchmarkCount: Int = 0
 )
 
 data class DeckRoleCounts(
@@ -75,7 +77,10 @@ data class SynergyAnalyzerReport(
     val keystoneCards: List<DeckCardNode>
 ) {
     val primaryArchetype: ArchetypeMatchResult?
-        get() = archetypeMatches.firstOrNull()
+        get() = archetypeMatches.firstOrNull { match ->
+            match.matchScore >= 30 && match.matchedCards.size >= 2 &&
+                (match.template.id != "artifact_lattice" || match.matchedBenchmarkCount >= 2)
+        }
 }
 
 object SynergyAnalyzerEngine {
@@ -103,7 +108,6 @@ object SynergyAnalyzerEngine {
                 "Unwinding Clock",
                 "Darksteel Forge",
                 "Whir of Invention",
-                "Sol Ring",
                 "Urza's Saga"
             )
         ),
@@ -473,11 +477,13 @@ object SynergyAnalyzerEngine {
             val typeLower = card.typeLine.lowercase()
             val tagsLower = card.synergyTags.lowercase()
 
-            if ("land" in typeLower) {
+            if (PlaytestMana.isLand(card)) {
                 lands += qty
             } else {
-                nonLandCount += qty
-                cmcSum += card.cmc * qty
+                if (card.metadataStatus != CardMetadataStatus.UNRESOLVED) {
+                    nonLandCount += qty
+                    cmcSum += card.cmc * qty
+                }
 
                 val isInteraction = "removal" in tagsLower ||
                     "countermagic" in tagsLower ||
@@ -578,7 +584,8 @@ object SynergyAnalyzerEngine {
                 template = template,
                 matchScore = totalScore,
                 matchedCards = matchedCards.toList(),
-                matchedTags = matchedTags.toList()
+                matchedTags = matchedTags.toList(),
+                matchedBenchmarkCount = benchmarkHits
             )
         }.sortedByDescending { it.matchScore }
     }

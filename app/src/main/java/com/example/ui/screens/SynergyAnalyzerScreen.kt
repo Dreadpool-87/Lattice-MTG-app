@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,11 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -44,16 +40,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.data.local.DeckZones
+import com.example.ui.components.MainTabHeader
 import com.example.domain.RelationshipType
 import com.example.ui.components.ColorIdentityRow
 import com.example.ui.components.SynergyCardLatticeCanvas
-import com.example.ui.theme.LatticeForestBase
 import com.example.ui.theme.LatticeSparkContainer
 import com.example.ui.theme.LatticeSparkGreen
 import com.example.ui.viewmodel.SynergyAnalyzerViewModel
@@ -61,7 +57,6 @@ import com.example.ui.viewmodel.SynergyAnalyzerViewModel
 @Composable
 fun SynergyAnalyzerScreen(
     viewModel: SynergyAnalyzerViewModel,
-    onAskOracleForDeck: (Long) -> Unit,
     onOpenDeck: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -76,113 +71,42 @@ fun SynergyAnalyzerScreen(
     ) {
         Column(
             modifier = Modifier
+                .widthIn(max = 960.dp)
                 .fillMaxSize()
-                .widthIn(max = 720.dp)
         ) {
-            // Branded Header + Deck Switcher
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
+            MainTabHeader(
+                title = stringResource(R.string.nav_synergy),
+                onOpenSettings = onOpenSettings,
+                settingsTag = "open_settings_button_synergy",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+            Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+                // Saved Decks Switcher
+                if (uiState.decks.isNotEmpty()) {
                     Row(
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Surface(
-                                color = LatticeForestBase,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.2.dp, LatticeSparkGreen.copy(alpha = 0.7f)),
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.lattice_logo),
-                                        contentDescription = "Lattice MTG Logo",
-                                        modifier = Modifier.size(26.dp)
+                        uiState.decks.forEach { deckItem ->
+                            val selected = deckItem.deck.id == uiState.selectedDeckId
+                            FilterChip(
+                                selected = selected,
+                                onClick = { viewModel.selectDeck(deckItem.deck.id) },
+                                label = {
+                                    Text(
+                                        text = deckItem.deck.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                }
-                            }
-                            Column {
-                                Text(
-                                    text = stringResource(R.string.synergy_title),
-                                    style = MaterialTheme.typography.headlineSmall
-                                )
-                                Text(
-                                    text = stringResource(R.string.synergy_subtitle),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (report != null) {
-                                AssistChip(
-                                    onClick = { onAskOracleForDeck(report.deckWithEntries.deck.id) },
-                                    label = { Text("Oracle") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Filled.AutoAwesome,
-                                            contentDescription = "Ask Oracle about synergy",
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    },
-                                    modifier = Modifier.testTag("synergy_ask_oracle_button")
-                                )
-                            }
-                            IconButton(
-                                onClick = onOpenSettings,
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("open_settings_button_synergy")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Settings,
-                                    contentDescription = stringResource(R.string.action_open_settings),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    // Saved Decks Switcher
-                    if (uiState.decks.isNotEmpty()) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                        ) {
-                            uiState.decks.forEach { deckItem ->
-                                val selected = deckItem.deck.id == uiState.selectedDeckId
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { viewModel.selectDeck(deckItem.deck.id) },
-                                    label = {
-                                        Text(
-                                            text = deckItem.deck.name,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = LatticeSparkContainer,
-                                        selectedLabelColor = LatticeSparkGreen
-                                    ),
-                                    modifier = Modifier.testTag("synergy_deck_chip_${deckItem.deck.id}")
-                                )
-                            }
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = LatticeSparkContainer,
+                                    selectedLabelColor = LatticeSparkGreen
+                                ),
+                                modifier = Modifier.testTag("synergy_deck_chip_${deckItem.deck.id}")
+                            )
                         }
                     }
                 }
@@ -276,19 +200,19 @@ fun SynergyAnalyzerScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 SynergyMetricTile(
-                                    label = "Card Links",
+                                    label = "Shown links",
                                     value = "${report.relationships.size}",
                                     accent = LatticeSparkGreen,
                                     modifier = Modifier.weight(1f)
                                 )
                                 SynergyMetricTile(
-                                    label = "Primary Fit",
+                                    label = "Primary fit",
                                     value = primary?.let { "${it.matchScore}%" } ?: "—",
                                     accent = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 SynergyMetricTile(
-                                    label = "Avg CMC",
+                                    label = "Avg mana value",
                                     value = "%.2f".format(report.roles.avgCmc),
                                     accent = MaterialTheme.colorScheme.secondary,
                                     modifier = Modifier.weight(1f)
@@ -314,7 +238,7 @@ fun SynergyAnalyzerScreen(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(
-                                                text = "Detected Archetype: ${primary.template.name}",
+                                                text = "Closest archetype: ${primary.template.name}",
                                                 style = MaterialTheme.typography.titleSmall,
                                                 color = LatticeSparkGreen
                                             )
@@ -326,7 +250,14 @@ fun SynergyAnalyzerScreen(
                                         }
                                     }
                                 }
+                            } else {
+                                Text("No strong archetype match", style = MaterialTheme.typography.bodyMedium)
                             }
+                            Text(
+                                "Links are curated matches and inferred interactions, capped at 32. Fit is a heuristic. Average mana value uses known nonland cards, including commanders.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -483,12 +414,13 @@ fun SynergyAnalyzerScreen(
                 item {
                     val activeMatch = report.archetypeMatches.firstOrNull {
                         it.template.id == uiState.selectedArchetypeId
-                    } ?: report.archetypeMatches.first()
+                    }
                     val deckCardNames = report.deckWithEntries.entries
+                        .filter { it.entry.zone == DeckZones.MAINBOARD || it.entry.zone == DeckZones.COMMANDER }
                         .map { it.card.name }
                         .toSet()
 
-                    ArchetypeBlueprintCard(
+                    if (activeMatch != null) ArchetypeBlueprintCard(
                         template = activeMatch.template,
                         matchResult = activeMatch,
                         roles = report.roles,

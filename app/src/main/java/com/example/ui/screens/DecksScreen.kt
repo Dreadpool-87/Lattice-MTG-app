@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,7 +29,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -52,11 +52,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -69,11 +71,9 @@ import com.example.data.local.DeckEntity
 import com.example.data.local.DeckWithEntries
 import com.example.ui.components.ColorIdentityRow
 import com.example.ui.components.ManaSymbolPip
-import com.example.ui.components.VaultStatusBadge
-import com.example.ui.theme.LocalWubrgTheme
-import com.example.ui.theme.WubrgTheme
-import com.example.ui.theme.WubrgColorStrip
+import com.example.ui.components.MainTabHeader
 import com.example.ui.viewmodel.DecksViewModel
+import java.io.IOException
 
 private val deckFormats = listOf("All", "Commander", "Modern", "Standard", "Pioneer", "Pauper", "Casual")
 
@@ -83,12 +83,16 @@ fun DecksScreen(
     snackbarHostState: SnackbarHostState,
     onOpenDeck: (Long) -> Unit,
     onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    catalogReady: Boolean = true
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val csvImport by viewModel.csvImport.collectAsStateWithLifecycle()
+    val importingDeck by viewModel.importingDeck.collectAsStateWithLifecycle()
+    val assets = LocalContext.current.assets
+    var exampleLoadFailed by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
-    var showImportDialog by remember { mutableStateOf(false) }
+    var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
     var deckToDelete by remember { mutableStateOf<DeckEntity?>(null) }
 
@@ -108,56 +112,17 @@ fun DecksScreen(
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier
+                .widthIn(max = 960.dp)
                 .fillMaxSize()
                 .testTag("decks_list")
-                .widthIn(max = 720.dp)
         ) {
             item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .testTag("decks_header")
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Image(
-                                painter = painterResource(R.drawable.lattice_logo),
-                                contentDescription = null,
-                                modifier = Modifier.size(38.dp)
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Lattice MTG", style = MaterialTheme.typography.titleLarge)
-                                VaultStatusBadge(
-                                    isOnline = uiState.isOnline,
-                                    offlineOnlyMode = uiState.offlineOnlyMode,
-                                    cachedCardCount = uiState.cachedCardCount
-                                )
-                            }
-                            IconButton(
-                                onClick = onOpenSettings,
-                                modifier = Modifier.testTag("open_settings_button_decks")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Settings,
-                                    contentDescription = stringResource(R.string.action_open_settings)
-                                )
-                            }
-                        }
-                        if (LocalWubrgTheme.current == WubrgTheme.WUBRG) {
-                            WubrgColorStrip(Modifier.fillMaxWidth().height(5.dp))
-                        }
-                    }
-                }
+                MainTabHeader(
+                    title = stringResource(R.string.nav_decks),
+                    onOpenSettings = onOpenSettings,
+                    settingsTag = "open_settings_button_decks",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).testTag("decks_header")
+                )
             }
 
             item {
@@ -183,6 +148,7 @@ fun DecksScreen(
                         }
                         OutlinedButton(
                             onClick = { showImportDialog = true },
+                            enabled = !importingDeck,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -193,6 +159,22 @@ fun DecksScreen(
                             Text(stringResource(R.string.action_import_deck))
                         }
                     }
+
+                    PlaytestExamples(
+                        catalogReady = catalogReady,
+                        importingDeck = importingDeck,
+                        exampleLoadFailed = exampleLoadFailed,
+                        onSelect = { example ->
+                            try {
+                                val text = assets.open("playtest-decks/${example.asset}")
+                                    .bufferedReader().use { it.readText() }
+                                exampleLoadFailed = false
+                                viewModel.importDeck(example.name, example.format, text, onOpenDeck)
+                            } catch (_: IOException) {
+                                exampleLoadFailed = true
+                            }
+                        }
+                    )
 
                     OutlinedTextField(
                         value = uiState.searchQuery,
@@ -582,6 +564,71 @@ private fun CreateDeckDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+private data class PlaytestExample(val name: String, val format: String, val asset: String)
+
+private val playtestExamples = listOf(
+    PlaytestExample("Orzhov Lifegain", "Casual", "Casual-Orzhov-Lifegain.txt"),
+    PlaytestExample("Golgari Midrange", "Casual", "Casual-Golgari-Midrange.txt"),
+    PlaytestExample("Klingon Fury", "Commander", "Commander-Klingon-Fury.txt"),
+    PlaytestExample("Multiverse Reforged", "Commander", "Commander-Multiverse-Reforged.txt")
+)
+
+@Composable
+private fun PlaytestExamples(
+    catalogReady: Boolean,
+    importingDeck: Boolean,
+    exampleLoadFailed: Boolean,
+    onSelect: (PlaytestExample) -> Unit
+) {
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().height(48.dp)
+        ) {
+            Text("Example decks", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Hide" else "Show 4")
+            }
+        }
+        if (expanded) {
+            BoxWithConstraints {
+                val columnCount = if (maxWidth >= 620.dp) 4 else 2
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    playtestExamples.chunked(columnCount).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            row.forEach { example ->
+                                Surface(
+                                    onClick = { onSelect(example) },
+                                    enabled = catalogReady && !importingDeck,
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.weight(1f).height(72.dp).testTag("example_${example.asset}")
+                                ) {
+                                    Column(
+                                        verticalArrangement = Arrangement.Center,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(example.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(example.format, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val message = when {
+                exampleLoadFailed -> "Could not read this example deck."
+                !catalogReady -> "Preparing offline card data…"
+                importingDeck -> "Importing deck…"
+                else -> null
+            }
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
 }
 
 @Composable

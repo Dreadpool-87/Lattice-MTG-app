@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.DeckWithEntries
 import com.example.data.repository.DeckRepository
-import com.example.domain.ArchetypeTemplate
 import com.example.domain.CardRelationship
 import com.example.domain.RelationshipType
 import com.example.domain.SynergyAnalyzerEngine
@@ -22,7 +21,7 @@ data class SynergyAnalyzerUiState(
     val report: SynergyAnalyzerReport? = null,
     val selectedCardId: String? = null,
     val selectedRelationshipFilter: RelationshipType? = null,
-    val selectedArchetypeId: String = SynergyAnalyzerEngine.commonArchetypes.first().id
+    val selectedArchetypeId: String? = null
 ) {
     val visibleRelationships: List<CardRelationship>
         get() {
@@ -40,9 +39,7 @@ data class SynergyAnalyzerUiState(
             }
         }
 
-    val activeArchetypeTemplate: ArchetypeTemplate
-        get() = SynergyAnalyzerEngine.commonArchetypes.firstOrNull { it.id == selectedArchetypeId }
-            ?: SynergyAnalyzerEngine.commonArchetypes.first()
+
 }
 
 class SynergyAnalyzerViewModel(
@@ -64,7 +61,6 @@ class SynergyAnalyzerViewModel(
         val effectiveDeck = decks.firstOrNull { it.deck.id == chosenDeckId } ?: decks.firstOrNull()
         val report = effectiveDeck?.let { SynergyAnalyzerEngine.analyzeDeck(it) }
         val defaultArchetypeId = report?.primaryArchetype?.template?.id
-            ?: SynergyAnalyzerEngine.commonArchetypes.first().id
         val effectiveArchetypeId = chosenArchetypeId ?: defaultArchetypeId
 
         SynergyAnalyzerUiState(

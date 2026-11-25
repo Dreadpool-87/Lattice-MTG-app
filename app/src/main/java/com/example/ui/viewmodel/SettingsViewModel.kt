@@ -3,7 +3,6 @@ package com.example.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.data.local.ChatDao
 import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
@@ -27,7 +26,6 @@ data class SettingsUiState(
     val playerCount: Int = 2,
     val cachedCardCount: Int = 0,
     val deckCount: Int = 0,
-    val oracleMessageCount: Int = 0,
     val isOnline: Boolean = false,
     val statusMessage: String? = null
 )
@@ -36,13 +34,12 @@ class SettingsViewModel(
     private val preferencesRepository: PreferencesRepository,
     private val cardRepository: CardRepository,
     deckRepository: DeckRepository,
-    private val chatDao: ChatDao,
     networkMonitor: NetworkMonitor
 ) : ViewModel() {
 
     private val statusMessageFlow = MutableStateFlow<String?>(null)
 
-    val uiState: StateFlow<SettingsUiState> = combine(
+    val uiState: StateFlow<SettingsUiState> = combine<Any?, SettingsUiState>(
         preferencesRepository.wubrgTheme,
         preferencesRepository.themeBrightnessMode,
         preferencesRepository.offlineOnlyMode,
@@ -52,12 +49,10 @@ class SettingsViewModel(
         preferencesRepository.playerCount,
         cardRepository.cardCount,
         deckRepository.deckCount,
-        chatDao.observeMessages(),
         networkMonitor.isOnline,
         statusMessageFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
-        val messages = values[9] as List<*>
         SettingsUiState(
             wubrgTheme = values[0] as WubrgTheme,
             brightnessMode = values[1] as ThemeBrightnessMode,
@@ -68,9 +63,8 @@ class SettingsViewModel(
             playerCount = values[6] as Int,
             cachedCardCount = values[7] as Int,
             deckCount = values[8] as Int,
-            oracleMessageCount = messages.size,
-            isOnline = values[10] as Boolean,
-            statusMessage = values[11] as String?
+            isOnline = values[9] as Boolean,
+            statusMessage = values[10] as String?
         )
     }.stateIn(
         scope = viewModelScope,
@@ -127,13 +121,6 @@ class SettingsViewModel(
         }
     }
 
-    fun clearOracleHistory() {
-        viewModelScope.launch {
-            chatDao.clearConversation()
-            statusMessageFlow.value = "Cleared Lattice Oracle conversation history."
-        }
-    }
-
     fun resetPreferences() {
         viewModelScope.launch {
             preferencesRepository.resetAllPreferences()
@@ -149,7 +136,6 @@ class SettingsViewModel(
         private val preferencesRepository: PreferencesRepository,
         private val cardRepository: CardRepository,
         private val deckRepository: DeckRepository,
-        private val chatDao: ChatDao,
         private val networkMonitor: NetworkMonitor
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -158,7 +144,6 @@ class SettingsViewModel(
                 preferencesRepository = preferencesRepository,
                 cardRepository = cardRepository,
                 deckRepository = deckRepository,
-                chatDao = chatDao,
                 networkMonitor = networkMonitor
             ) as T
         }

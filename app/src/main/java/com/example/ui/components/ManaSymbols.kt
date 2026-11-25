@@ -11,11 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,7 +24,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.DeckAnalytics
-import com.example.ui.theme.ArcaneCyan
 import com.example.ui.theme.ManaBlackBg
 import com.example.ui.theme.ManaBlackFg
 import com.example.ui.theme.ManaBlueBg
@@ -144,59 +138,5 @@ fun RarityPill(rarity: String, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
-    }
-}
-
-@Composable
-fun VaultStatusBadge(
-    isOnline: Boolean,
-    offlineOnlyMode: Boolean,
-    cachedCardCount: Int,
-    modifier: Modifier = Modifier
-) {
-    val (label, icon, tint) = when {
-        offlineOnlyMode -> Triple(
-            "Offline Locked • $cachedCardCount Cards",
-            Icons.Filled.Storage,
-            MaterialTheme.colorScheme.primary
-        )
-        isOnline -> Triple(
-            "Online + Room Vault ($cachedCardCount)",
-            Icons.Filled.CloudDone,
-            ArcaneCyan
-        )
-        else -> Triple(
-            "Offline Ready • $cachedCardCount Cached",
-            Icons.Filled.CloudOff,
-            MaterialTheme.colorScheme.primary
-        )
-    }
-
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f),
-        shape = RoundedCornerShape(20.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            tint.copy(alpha = 0.45f)
-        ),
-        modifier = modifier
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = tint,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
     }
 }

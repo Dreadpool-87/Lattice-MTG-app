@@ -26,6 +26,7 @@ internal object AppUpdates {
         .build()
 
     suspend fun latest(context: Context): AppRelease? = withContext(Dispatchers.IO) {
+        if (context.packageName.endsWith(".preview")) return@withContext null
         val request = Request.Builder().url("$RELEASES/latest/download/android-update.json").build()
         client.newCall(request).execute().use { response ->
             if (response.code == 404) return@withContext null

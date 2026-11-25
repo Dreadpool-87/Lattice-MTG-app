@@ -12,16 +12,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Style
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.LibraryBooks
@@ -58,15 +57,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.ai.configureAppCheck
 import com.example.ui.screens.AboutScreen
 import com.example.ui.screens.CatalogCardInspector
 import com.example.ui.screens.DeckDetailScreen
 import com.example.ui.screens.DecksScreen
-import com.example.ui.screens.OracleChatScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SynergyAnalyzerScreen
 import com.example.ui.screens.TabletopScreen
+import com.example.ui.screens.FaceToFaceScreen
 import com.example.ui.screens.VaultScreen
 import com.example.ui.theme.LatticeMtgTheme
 import com.example.ui.theme.LocalWubrgTheme
@@ -74,7 +72,6 @@ import com.example.ui.theme.WubrgTheme
 import com.example.ui.theme.WubrgSwatchColors
 import com.example.ui.viewmodel.DeckDetailViewModel
 import com.example.ui.viewmodel.DecksViewModel
-import com.example.ui.viewmodel.OracleChatViewModel
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.ui.viewmodel.SynergyAnalyzerViewModel
 import com.example.ui.viewmodel.TabletopViewModel
@@ -85,7 +82,7 @@ object Routes {
     const val SYNERGY = "synergy"
     const val VAULT = "vault"
     const val VAULT_CATALOG = "vault/catalog"
-    const val ORACLE = "oracle"
+    const val FACE_TO_FACE = "face_to_face"
     const val TABLETOP = "tabletop"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
@@ -106,10 +103,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // STEP 1: Configure App Check with launch intent before any UI or Firebase operations
-        configureAppCheck(this, intent)
-
-        // STEP 2: Enable Edge-to-Edge and render Compose UI
         enableEdgeToEdge()
         val container = (application as LatticeApp).container
 
@@ -150,15 +143,6 @@ fun LatticeRootApp(container: AppContainer) {
             preferencesRepository = container.preferencesRepository
         )
     )
-    val oracleViewModel: OracleChatViewModel = viewModel(
-        factory = OracleChatViewModel.Factory(
-            chatDao = container.chatDao,
-            deckRepository = container.deckRepository,
-            cardRepository = container.cardRepository,
-            networkMonitor = container.networkMonitor,
-            preferencesRepository = container.preferencesRepository
-        )
-    )
     val tabletopViewModel: TabletopViewModel = viewModel(
         factory = TabletopViewModel.Factory(
             cardRepository = container.cardRepository,
@@ -177,7 +161,6 @@ fun LatticeRootApp(container: AppContainer) {
             preferencesRepository = container.preferencesRepository,
             cardRepository = container.cardRepository,
             deckRepository = container.deckRepository,
-            chatDao = container.chatDao,
             networkMonitor = container.networkMonitor
         )
     )
@@ -187,6 +170,15 @@ fun LatticeRootApp(container: AppContainer) {
     val catalogInstalled by offlineCatalog.installed.collectAsStateWithLifecycle(initialValue = emptyMap())
     val newerCardData = catalogManifest?.packs.orEmpty().any {
         it.id in catalogInstalled && catalogInstalled[it.id] != it.sha256
+    }
+    LaunchedEffect(offlineCatalog) {
+        try {
+            offlineCatalog.installBundledCatalog()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            snackbarHostState.showSnackbar("Could not prepare the included card catalog.")
+        }
     }
     LaunchedEffect(currentRoute) {
         if (currentRoute in setOf(Routes.VAULT, Routes.VAULT_CATALOG, Routes.SETTINGS)) {
@@ -224,13 +216,6 @@ fun LatticeRootApp(container: AppContainer) {
                 testTag = "nav_tab_vault"
             ),
             NavTabItem(
-                route = Routes.ORACLE,
-                labelRes = R.string.nav_oracle,
-                selectedIcon = Icons.Filled.AutoAwesome,
-                unselectedIcon = Icons.Outlined.AutoAwesome,
-                testTag = "nav_tab_oracle"
-            ),
-            NavTabItem(
                 route = Routes.TABLETOP,
                 labelRes = R.string.nav_tabletop,
                 selectedIcon = Icons.Filled.Casino,
@@ -244,7 +229,6 @@ fun LatticeRootApp(container: AppContainer) {
         Routes.DECKS,
         Routes.SYNERGY,
         Routes.VAULT,
-        Routes.ORACLE,
         Routes.TABLETOP
     )
 
@@ -290,6 +274,7 @@ fun LatticeRootApp(container: AppContainer) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding)
             ) {
                 if (useNavRail && isTopLevelRoute) {
                     NavigationRail(
@@ -323,6 +308,7 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.DECKS) {
                         DecksScreen(
                             viewModel = decksViewModel,
+                            catalogReady = "all" in catalogInstalled,
                             snackbarHostState = snackbarHostState,
                             onOpenDeck = { deckId ->
                                 navController.navigate(Routes.deckDetail(deckId))
@@ -334,14 +320,6 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.SYNERGY) {
                         SynergyAnalyzerScreen(
                             viewModel = synergyViewModel,
-                            onAskOracleForDeck = { deckId ->
-                                oracleViewModel.selectContextDeck(deckId)
-                                navController.navigate(Routes.ORACLE) {
-                                    popUpTo(Routes.DECKS) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
                             onOpenDeck = { deckId ->
                                 navController.navigate(Routes.deckDetail(deckId))
                             },
@@ -368,19 +346,17 @@ fun LatticeRootApp(container: AppContainer) {
                         )
                     }
 
-                    composable(Routes.ORACLE) {
-                        OracleChatScreen(
-                            viewModel = oracleViewModel,
-                            onOpenSettings = { navController.navigate(Routes.SETTINGS) }
-                        )
-                    }
-
                     composable(Routes.TABLETOP) {
                         TabletopScreen(
                             viewModel = tabletopViewModel,
                             snackbarHostState = snackbarHostState,
+                            onOpenFaceToFace = { navController.navigate(Routes.FACE_TO_FACE) },
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                         )
+                    }
+
+                    composable(Routes.FACE_TO_FACE) {
+                        FaceToFaceScreen(tabletopViewModel, onBack = { navController.popBackStack() })
                     }
 
                     composable(Routes.SETTINGS) {
@@ -420,14 +396,6 @@ fun LatticeRootApp(container: AppContainer) {
                             onBack = { navController.popBackStack() },
                             cardInspector = { cards, card, close ->
                                 CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards, allowAddToDeck = false)
-                            },
-                            onAskOracleAboutDeck = { id ->
-                                oracleViewModel.selectContextDeck(id)
-                                navController.navigate(Routes.ORACLE) {
-                                    popUpTo(Routes.DECKS) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
                             },
                             onOpenSynergyAnalyzer = { id ->
                                 synergyViewModel.selectDeck(id)
