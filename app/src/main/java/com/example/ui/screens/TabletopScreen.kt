@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,12 +18,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -44,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -51,7 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
-import com.example.ui.components.VaultStatusBadge
+import com.example.ui.components.MainTabHeader
 import com.example.ui.viewmodel.PlayerTrackerState
 import com.example.ui.viewmodel.TabletopViewModel
 
@@ -60,6 +62,7 @@ fun TabletopScreen(
     viewModel: TabletopViewModel,
     snackbarHostState: SnackbarHostState,
     onOpenSettings: () -> Unit,
+    onOpenFaceToFace: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -85,39 +88,86 @@ fun TabletopScreen(
         modifier = modifier.fillMaxSize()
     ) {
         LazyColumn(
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
+                .widthIn(max = 960.dp)
                 .fillMaxSize()
-                .widthIn(max = 720.dp)
         ) {
             item {
-                Row(
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                MainTabHeader(
+                    title = stringResource(R.string.nav_tabletop),
+                    onOpenSettings = onOpenSettings,
+                    settingsTag = "open_settings_button_tabletop"
+                )
+            }
+
+            // Life, poison and commander damage
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = "Tabletop & Offline Vault",
-                        style = MaterialTheme.typography.headlineMedium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("open_settings_button_tabletop")
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(16.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = stringResource(R.string.action_open_settings),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Tabletop Life Tracker", style = MaterialTheme.typography.titleMedium)
+                            OutlinedButton(
+                                onClick = viewModel::resetMatch,
+                                modifier = Modifier.testTag("reset_life_button")
+                            ) {
+                                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Reset")
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = uiState.playerCount == 2 && uiState.startingLife == 20,
+                                onClick = { viewModel.configureMatch(2, 20) },
+                                label = { Text("1v1 • 20") }
+                            )
+                            FilterChip(
+                                selected = uiState.playerCount == 2 && uiState.startingLife == 40,
+                                onClick = { viewModel.configureMatch(2, 40) },
+                                label = { Text("2P • 40") }
+                            )
+                            FilterChip(
+                                selected = uiState.playerCount == 4 && uiState.startingLife == 40,
+                                onClick = { viewModel.configureMatch(4, 40) },
+                                label = { Text("Pod 4P • 40") }
+                            )
+                        }
+
+                        if (uiState.playerCount == 2) {
+                            Button(
+                                onClick = onOpenFaceToFace,
+                                modifier = Modifier.fillMaxWidth().testTag("face_to_face_button")
+                            ) { Text("Face-to-face life counter") }
+                        }
+
+                        uiState.players.forEach { player ->
+                            PlayerLifeRow(
+                                player = player,
+                                onAdjustLife = { delta -> viewModel.adjustLife(player.id, delta) },
+                                onAdjustPoison = { delta -> viewModel.adjustPoison(player.id, delta) },
+                                onAdjustCmdr = { delta -> viewModel.adjustCommanderDamage(player.id, delta) }
+                            )
+                        }
                     }
                 }
             }
 
-            // 1. Offline Room Storage & Sync Control
+            // Offline card data and sync
             item {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -141,13 +191,8 @@ fun TabletopScreen(
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Room Offline Storage", style = MaterialTheme.typography.titleMedium)
+                                Text("Offline card data", style = MaterialTheme.typography.titleMedium)
                             }
-                            VaultStatusBadge(
-                                isOnline = uiState.isOnline,
-                                offlineOnlyMode = uiState.offlineOnlyMode,
-                                cachedCardCount = uiState.cachedCardCount
-                            )
                         }
 
                         Row(
@@ -222,64 +267,6 @@ fun TabletopScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Verify Base DB")
                             }
-                        }
-                    }
-                }
-            }
-
-            // 2. Tabletop Life, Poison & Commander Damage Tracker
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Tabletop Life Tracker", style = MaterialTheme.typography.titleMedium)
-                            OutlinedButton(
-                                onClick = viewModel::resetMatch,
-                                modifier = Modifier.testTag("reset_life_button")
-                            ) {
-                                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Reset")
-                            }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                selected = uiState.playerCount == 2 && uiState.startingLife == 20,
-                                onClick = { viewModel.configureMatch(2, 20) },
-                                label = { Text("1v1 • 20") }
-                            )
-                            FilterChip(
-                                selected = uiState.playerCount == 2 && uiState.startingLife == 40,
-                                onClick = { viewModel.configureMatch(2, 40) },
-                                label = { Text("2P • 40") }
-                            )
-                            FilterChip(
-                                selected = uiState.playerCount == 4 && uiState.startingLife == 40,
-                                onClick = { viewModel.configureMatch(4, 40) },
-                                label = { Text("Pod 4P • 40") }
-                            )
-                        }
-
-                        uiState.players.forEach { player ->
-                            PlayerLifeRow(
-                                player = player,
-                                onAdjustLife = { delta -> viewModel.adjustLife(player.id, delta) },
-                                onAdjustPoison = { delta -> viewModel.adjustPoison(player.id, delta) },
-                                onAdjustCmdr = { delta -> viewModel.adjustCommanderDamage(player.id, delta) }
-                            )
                         }
                     }
                 }
@@ -399,6 +386,81 @@ private fun StatTile(label: String, value: String, modifier: Modifier = Modifier
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+fun FaceToFaceScreen(viewModel: TabletopViewModel, onBack: () -> Unit) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val view = LocalView.current
+    DisposableEffect(state.keepScreenAwake) {
+        view.keepScreenOn = state.keepScreenAwake
+        onDispose { view.keepScreenOn = false }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        state.players.getOrNull(1)?.let { opponent ->
+            FaceToFaceLifePanel(
+                player = opponent,
+                onAdjust = { viewModel.adjustLife(opponent.id, it) },
+                modifier = Modifier.weight(1f).rotate(180f)
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Tabletop")
+            }
+            Text("Face to face", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+            Text("${state.startingLife} starting life", style = MaterialTheme.typography.labelSmall)
+        }
+        state.players.firstOrNull()?.let { player ->
+            FaceToFaceLifePanel(
+                player = player,
+                onAdjust = { viewModel.adjustLife(player.id, it) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FaceToFaceLifePanel(
+    player: PlayerTrackerState,
+    onAdjust: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth().testTag("face_player_${player.id}"),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        BoxWithConstraints(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
+            val compact = maxHeight < 110.dp
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedButton(onClick = { onAdjust(-1) }, modifier = Modifier.testTag("face_life_minus_${player.id}")) {
+                    Text("−1")
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(player.name, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        player.life.toString(),
+                        style = if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.displayLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.testTag("face_life_${player.id}")
+                    )
+                }
+                Button(onClick = { onAdjust(1) }, modifier = Modifier.testTag("face_life_plus_${player.id}")) {
+                    Text("+1")
+                }
+            }
         }
     }
 }

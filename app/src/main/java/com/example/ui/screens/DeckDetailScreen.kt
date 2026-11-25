@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
@@ -87,7 +86,6 @@ fun DeckDetailScreen(
     viewModel: DeckDetailViewModel,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
-    onAskOracleAboutDeck: (Long) -> Unit,
     onOpenSynergyAnalyzer: (Long) -> Unit,
     cardInspector: @Composable (List<CardEntity>, CardEntity, () -> Unit) -> Unit,
     modifier: Modifier = Modifier
@@ -114,6 +112,7 @@ fun DeckDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                expandedHeight = 52.dp,
                 title = {
                     Column {
                         Text(
@@ -152,18 +151,6 @@ fun DeckDetailScreen(
                 },
                 actions = {
                     if (deckWithEntries != null) {
-                        IconButton(
-                            onClick = { onAskOracleAboutDeck(deckWithEntries.deck.id) },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("ask_oracle_deck_button")
-                        ) {
-                            Icon(
-                                Icons.Filled.AutoAwesome,
-                                contentDescription = "Ask Lattice Oracle about this deck",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
                         IconButton(
                             onClick = {
                                 val exported = viewModel.exportDeckText()
@@ -256,7 +243,7 @@ fun DeckDetailScreen(
                     )
 
                     1 -> LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         modifier = Modifier.weight(1f)
                     ) {
@@ -370,7 +357,7 @@ fun DeckDetailScreen(
                     }
 
                     2 -> LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         modifier = Modifier.weight(1f)
                     ) {
@@ -424,28 +411,32 @@ fun DeckDetailScreen(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.padding(16.dp)
                                 ) {
-                                    Text("Hypergeometric Draw Consistency", style = MaterialTheme.typography.titleMedium)
-                                    Row(
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("2+ Lands in Opening 7", style = MaterialTheme.typography.bodyMedium)
-                                        Text(
-                                            text = "${(analytics.openingLandOdds7 * 100).toInt()}%",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                                    Text("Land draw consistency", style = MaterialTheme.typography.titleMedium)
+                                    val rows = listOf(
+                                        Triple("2+ lands in opening 7", analytics.openingLandOdds7, 7),
+                                        Triple("3+ lands by turn 3 · 9 cards", analytics.turn3Land3Odds, 9),
+                                        Triple("3+ lands by turn 3 · 10 cards", analytics.turn3Land3OnDrawOdds, 10)
+                                    )
+                                    rows.forEach { (label, odds, cardsSeen) ->
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                            Text(
+                                                if (analytics.drawLibrarySize < cardsSeen) "—" else "%.1f%%".format(odds * 100),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
                                     }
-                                    Row(
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("3+ Lands by Turn 3 (9 cards)", style = MaterialTheme.typography.bodyMedium)
-                                        Text(
-                                            text = "${(analytics.turn3Land3Odds * 100).toInt()}%",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.secondary
-                                        )
+                                    Text(
+                                        "${analytics.drawLibraryLands} lands in ${analytics.drawLibrarySize} mainboard cards. 9 cards on the play in a duel, 10 on the draw or with a first-turn draw in multiplayer. Before mulligans or extra draws.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (analytics.unresolvedDrawCards > 0) {
+                                        Text("Unresolved cards are counted as nonlands in the estimate.", style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
                             }
@@ -458,7 +449,17 @@ fun DeckDetailScreen(
                         onMulligan = { viewModel.startNewTestHand(isMulligan = true) },
                         onDrawCard = viewModel::drawCard,
                         onPlayCard = viewModel::playCardFromHand,
+                        onInspectCard = { card -> inspectedCard = listOf(card) to card },
                         onPutBottom = viewModel::putOnBottomForMulligan,
+                        onNextTurn = viewModel::nextTurn,
+                        onUntapAll = viewModel::untapAll,
+                        onTogglePermanentTapped = viewModel::togglePermanentTapped,
+                        onMoveBattlefieldCard = viewModel::moveBattlefieldCard,
+                        onCastCommander = viewModel::castCommander,
+                        onScryTop = viewModel::scryTop,
+                        onResolveScry = viewModel::resolveScry,
+                        onShuffleLibrary = viewModel::shuffleLibrary,
+                        onReturnFromGraveyard = viewModel::returnFromGraveyardToHand,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -511,7 +512,7 @@ private fun DeckListZoneTab(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 2.dp)
         ) {
             DeckZones.allZones.forEach { zone ->
                 val count = zoneCounts[zone] ?: 0
@@ -541,7 +542,7 @@ private fun DeckListZoneTab(
         } else {
             val ordered = remember(deckEntries) { deckEntries.sortedBy { it.card.cmc } }
             LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 68.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {

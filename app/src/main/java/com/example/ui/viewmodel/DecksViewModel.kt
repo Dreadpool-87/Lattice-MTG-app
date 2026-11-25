@@ -46,6 +46,8 @@ class DecksViewModel(
     private val statusMessage = MutableStateFlow<String?>(null)
     private val _csvImport = MutableStateFlow(DeckCsvImportState())
     val csvImport: StateFlow<DeckCsvImportState> = _csvImport
+    private val _importingDeck = MutableStateFlow(false)
+    val importingDeck: StateFlow<Boolean> = _importingDeck
 
     val uiState: StateFlow<DecksUiState> = combine(
         deckRepository.allDecks,
@@ -132,7 +134,7 @@ class DecksViewModel(
     }
 
     fun importDeck(name: String, format: String, rawList: String, onImported: (Long) -> Unit) {
-        if (rawList.isBlank()) return
+        if (rawList.isBlank() || !_importingDeck.compareAndSet(false, true)) return
         viewModelScope.launch {
             try {
                 val result = deckRepository.importDeckFromText(
@@ -147,6 +149,8 @@ class DecksViewModel(
                 throw cancelled
             } catch (_: Exception) {
                 statusMessage.value = "Could not import the deck. Check the decklist and try again."
+            } finally {
+                _importingDeck.value = false
             }
         }
     }

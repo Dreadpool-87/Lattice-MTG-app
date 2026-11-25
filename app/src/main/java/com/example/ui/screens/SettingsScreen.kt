@@ -22,9 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
@@ -78,7 +76,6 @@ fun SettingsScreen(
     offlineArtwork: com.example.data.repository.OfflineArtworkRepository? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showClearOracleDialog by remember { mutableStateOf(false) }
     var showResetPrefsDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.statusMessage) {
@@ -92,19 +89,8 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = stringResource(R.string.settings_title),
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_subtitle),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
+                expandedHeight = 52.dp,
+                title = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -129,13 +115,15 @@ fun SettingsScreen(
                 .padding(innerPadding)
         ) {
             LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
+                    .widthIn(max = 960.dp)
                     .fillMaxSize()
-                    .widthIn(max = 720.dp)
             ) {
-                item { AppUpdateSettings() }
+                if (!com.example.BuildConfig.APPLICATION_ID.endsWith(".preview")) {
+                    item { AppUpdateSettings() }
+                }
                 if (offlineCatalog != null) {
                     item { OfflineCatalogSettings(offlineCatalog, uiState.offlineOnlyMode) }
                 }
@@ -300,12 +288,7 @@ fun SettingsScreen(
                                 accent = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.weight(1f)
                             )
-                            SynergyMetricTile(
-                                label = "Oracle Turns",
-                                value = uiState.oracleMessageCount.toString(),
-                                accent = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f)
-                            )
+
                         }
 
                         Row(
@@ -328,28 +311,16 @@ fun SettingsScreen(
                     }
                 }
 
-                // 4. Oracle AI & Data Management
+                // App preferences
                 item {
                     SettingsSectionCard(
-                        title = "Oracle & App Data",
-                        icon = Icons.Filled.AutoAwesome
+                        title = "App Data",
+                        icon = Icons.Filled.Restore
                     ) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            OutlinedButton(
-                                onClick = { showClearOracleDialog = true },
-                                enabled = uiState.oracleMessageCount > 0,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("setting_clear_oracle_button")
-                            ) {
-                                Icon(Icons.Filled.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Clear Oracle", maxLines = 1)
-                            }
                             OutlinedButton(
                                 onClick = { showResetPrefsDialog = true },
                                 modifier = Modifier
@@ -426,12 +397,6 @@ fun SettingsScreen(
     }
 
     SettingsConfirmationDialogs(
-        showClearOracleDialog = showClearOracleDialog,
-        onDismissClearOracle = { showClearOracleDialog = false },
-        onConfirmClearOracle = {
-            showClearOracleDialog = false
-            viewModel.clearOracleHistory()
-        },
         showResetPrefsDialog = showResetPrefsDialog,
         onDismissResetPrefs = { showResetPrefsDialog = false },
         onConfirmResetPrefs = {

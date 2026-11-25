@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -34,6 +36,7 @@ import com.example.data.repository.OfflineCatalogRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OfflineCatalogSettings(repository: OfflineCatalogRepository, offlineOnly: Boolean) {
     val context = LocalContext.current
@@ -66,8 +69,9 @@ internal fun OfflineCatalogSettings(repository: OfflineCatalogRepository, offlin
         val full = available?.packs?.first()
         Text(
             when {
-                offlineOnly -> "Turn off offline-only mode to check or download."
-                available == null -> "Download card data from Lattice to browse offline."
+                downloading == "all" && "all" !in installed -> "Preparing offline card data…"
+                available == null && "all" in installed -> "All cards available offline"
+                available == null -> "Includes all cards · ${repository.bundledCatalogSnapshot}"
                 available.packs.any { it.id in installed && installed[it.id] != it.sha256 } ->
                     "New card data available · ${available.snapshot}"
                 else -> "Lattice catalog · ${available.snapshot}"
@@ -76,45 +80,46 @@ internal fun OfflineCatalogSettings(repository: OfflineCatalogRepository, offlin
         )
         if (downloading != null || checking) LinearProgressIndicator(Modifier.fillMaxWidth())
         message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        OutlinedButton(
-            enabled = !offlineOnly && !checking && downloading == null,
-            onClick = {
-                checking = true
-                message = null
-                scope.launch {
-                    try {
-                        val latest = repository.check()
-                        if (latest != null && installed.isNotEmpty() &&
-                            latest.packs.none { it.id in installed && installed[it.id] != it.sha256 }) {
-                            message = "Your downloaded card data is up to date."
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        message = "Could not check for card data. Try again later."
-                    } finally {
-                        checking = false
-                    }
-                }
-            }
-        ) { Text("Check for card data updates") }
-        if (full != null) {
-            val current = installed[full.id] == full.sha256
-            val action = if (full.id in installed) "Update all cards" else "Download all cards"
-            Button(
-                enabled = !offlineOnly && !checking && downloading == null && !current,
-                onClick = { download(full) }
-            ) {
-                Text(if (current) "All cards downloaded" else "$action · ${Formatter.formatShortFileSize(context, full.bytes)}")
-            }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 enabled = !offlineOnly && !checking && downloading == null,
-                onClick = { query = ""; showSets = true }
-            ) { Text("Choose a set") }
-            Text(
-                "All cards includes one printing per card. Set downloads include individual collector numbers. Card images are loaded separately.",
-                style = MaterialTheme.typography.bodySmall
-            )
+                onClick = {
+                    checking = true
+                    message = null
+                    scope.launch {
+                        try {
+                            val latest = repository.check()
+                            if (latest != null && installed.isNotEmpty() &&
+                                latest.packs.none { it.id in installed && installed[it.id] != it.sha256 }) {
+                                message = "Your downloaded card data is up to date."
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            message = "Could not check for card data. Try again later."
+                        } finally {
+                            checking = false
+                        }
+                    }
+                }
+            ) { Text("Check for updates") }
+            if (full != null) {
+                val current = installed[full.id] == full.sha256
+                val action = if (full.id in installed) "Update all cards" else "Download all cards"
+                if (!current) Button(
+                    enabled = !offlineOnly && !checking && downloading == null,
+                    onClick = { download(full) }
+                ) {
+                    Text("$action · ${Formatter.formatShortFileSize(context, full.bytes)}")
+                }
+                OutlinedButton(
+                    enabled = !offlineOnly && !checking && downloading == null,
+                    onClick = { query = ""; showSets = true }
+                ) { Text("Choose a set") }
+            }
+        }
+        if (offlineOnly) {
+            Text("Offline-only mode is on.", style = MaterialTheme.typography.bodySmall)
         }
     }
 

@@ -20,6 +20,8 @@ import okio.buffer
 import okio.source
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
+import java.util.Properties
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
@@ -79,6 +81,30 @@ class OfflineCatalogRepository(
         }
     }
 
+    val bundledCatalogSnapshot: String by lazy { bundledMetadata.getProperty("snapshot") }
+
+    private val bundledMetadata: Properties by lazy {
+        Properties().apply { context.assets.open("offline-catalog.properties").use(::load) }
+    }
+
+    suspend fun installBundledCatalog() = mutex.withLock {
+        if ("all" in installed.first()) return@withLock
+        val pack = OfflineCatalogPack(
+            "all", "All cards",
+            bundledMetadata.getProperty("count").toInt(),
+            bundledMetadata.getProperty("bytes").toLong(),
+            bundledMetadata.getProperty("sha256")
+        )
+        _downloading.value = pack.id
+        try {
+            withContext(Dispatchers.IO) {
+                context.assets.open("offline-catalog/all.pack").use { importPack(pack, it) }
+            }
+        } finally {
+            _downloading.value = null
+        }
+    }
+
     suspend fun download(pack: OfflineCatalogPack) = mutex.withLock {
         val current = _manifest.value
         check(current?.packs?.contains(pack) == true) { "Check for card data updates again." }
@@ -89,23 +115,7 @@ class OfflineCatalogRepository(
                 val file = File.createTempFile("offline-cards-", ".gz", context.cacheDir)
                 try {
                     fetch(pack, file)
-                    database.withTransaction {
-                        GZIPInputStream(file.inputStream()).source().buffer().use { source ->
-                            val reader = JsonReader.of(source)
-                            val seen = HashSet<String>()
-                            reader.beginArray()
-                            while (reader.hasNext()) {
-                                ensureActive()
-                                val card = checkNotNull(adapter.fromJson(reader))
-                                check(card.id.matches(PRINTING_ID) && seen.add(card.id) && seen.size <= pack.count)
-                                check(pack.id == "all" || card.set == pack.id.removePrefix("set-"))
-                                database.cardDao().storeCatalogPrinting(card.toCardEntity())
-                            }
-                            reader.endArray()
-                            check(seen.size == pack.count && reader.peek() == JsonReader.Token.END_DOCUMENT)
-                        }
-                    }
-                    preferences.recordCatalogPack(pack.id, pack.sha256)
+                    file.inputStream().use { importPack(pack, it) }
                 } finally {
                     file.delete()
                 }
@@ -113,6 +123,26 @@ class OfflineCatalogRepository(
         } finally {
             _downloading.value = null
         }
+    }
+
+    private suspend fun importPack(pack: OfflineCatalogPack, compressed: InputStream) {
+        database.withTransaction {
+            GZIPInputStream(compressed).source().buffer().use { source ->
+                val reader = JsonReader.of(source)
+                val seen = HashSet<String>()
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val card = checkNotNull(adapter.fromJson(reader))
+                    check(card.id.matches(PRINTING_ID) && seen.add(card.id) && seen.size <= pack.count)
+                    check(pack.id == "all" || card.set == pack.id.removePrefix("set-"))
+                    database.cardDao().storeCatalogPrinting(card.toCardEntity())
+                }
+                reader.endArray()
+                check(seen.size == pack.count && reader.peek() == JsonReader.Token.END_DOCUMENT)
+            }
+        }
+        preferences.recordCatalogPack(pack.id, pack.sha256)
     }
 
     private suspend fun fetch(pack: OfflineCatalogPack, file: File) = withContext(Dispatchers.IO) {

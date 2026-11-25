@@ -53,8 +53,8 @@ internal fun SettingsSectionCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(16.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -180,32 +180,10 @@ internal fun WubrgThemeOptionCard(
 
 @Composable
 internal fun SettingsConfirmationDialogs(
-    showClearOracleDialog: Boolean,
-    onDismissClearOracle: () -> Unit,
-    onConfirmClearOracle: () -> Unit,
     showResetPrefsDialog: Boolean,
     onDismissResetPrefs: () -> Unit,
     onConfirmResetPrefs: () -> Unit
 ) {
-    if (showClearOracleDialog) {
-        AlertDialog(
-            onDismissRequest = onDismissClearOracle,
-            title = { Text("Clear Oracle History?") },
-            text = {
-                Text("Deletes all saved messages in Lattice Oracle chat. Your decks and cards will remain untouched.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = onConfirmClearOracle,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Clear History") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissClearOracle) { Text("Cancel") }
-            }
-        )
-    }
-
     if (showResetPrefsDialog) {
         AlertDialog(
             onDismissRequest = onDismissResetPrefs,

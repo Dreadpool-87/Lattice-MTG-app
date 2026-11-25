@@ -351,7 +351,7 @@ internal fun ArchetypeBlueprintCard(
             RoleComparisonBar("Draw / Ramp / Tutors", roles.drawAndRamp, targetDrawRamp)
 
             Text(
-                text = "Archetype Pillars (Highlighted = In Your Deck)",
+                text = "Example cards · highlighted when in your deck",
                 style = MaterialTheme.typography.titleSmall
             )
             FlowRow(

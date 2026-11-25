@@ -21,7 +21,6 @@ class AppContainer(application: Application) {
     val networkMonitor by lazy { NetworkMonitor(application) }
     val preferencesRepository by lazy { PreferencesRepository(application) }
     private val scryfallApi by lazy { ScryfallApi.create() }
-    val chatDao by lazy { database.chatDao() }
     val vaultCollectionDao by lazy { database.vaultCollectionDao() }
     val offlineCatalog by lazy { OfflineCatalogRepository(application, database, preferencesRepository) }
     val offlineArtwork by lazy { OfflineArtworkRepository(application, database, preferencesRepository, offlineCatalog) }
