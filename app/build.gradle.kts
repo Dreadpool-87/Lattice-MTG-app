@@ -71,6 +71,7 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+    resValues = oracleDeckPreview
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
