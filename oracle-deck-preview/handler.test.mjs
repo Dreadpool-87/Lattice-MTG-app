@@ -154,3 +154,31 @@ test("deck curve answers receive per-turn mana constraints and use plain-text em
   assert.match(system.content, /one white and one black mana/);
   assert.match(system.content, /Never infer mana colors from the curve/);
 });
+
+test("the Dutch early-curve question uses deck data and no model call", async () => {
+  const input = {
+    ...deckQuestion,
+    question: "Wat zegt mijn manacurve over mijn eerste drie beurten? Kun je uit die cijfers ook afleiden of ik op beurt twee zowel witte als zwarte mana heb?",
+    context: {
+      ...deckQuestion.context,
+      analytics: "Playable cards: 60. Lands: 23. Average mana value: 2.4054. Curve (6 means 6+): {0=0, 1=8, 2=13, 3=11, 4=3, 5=2, 6=0}. Copy-limit warning: false.",
+    },
+  };
+  const { env, seen } = fixtures(2);
+  const response = await handler.fetch(ask(input), env);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.match(result.text, /8 spells van 1 mana, 13 van 2 mana en 11 van 3 mana/);
+  assert.match(result.text, /Beurt 1: 1 mana\. Een spell van 1 mana past\./);
+  assert.match(result.text, /Beurt 2: 2 mana\. Een spell van 2 mana of twee van 1 mana/);
+  assert.match(result.text, /Beurt 3: 3 mana\. Een spell van 3 mana, 2 \+ 1/);
+  assert.match(result.text, /Wit én zwart op beurt 2 kun je uit de curve niet afleiden/);
+  assert.match(result.text, /getapt binnenkomt op beurt 2 helpt die beurt normaal niet/);
+  assert.equal(result.neurons, 0);
+  assert.equal(result.remaining, 1);
+  assert.deepEqual(seen.infer, []);
+  assert.deepEqual(seen.usage, []);
+
+  await handler.fetch(ask({ ...input, question: input.question + " Geef ook een pastarecept." }), env);
+  assert.equal(seen.infer.length, 1);
+});
