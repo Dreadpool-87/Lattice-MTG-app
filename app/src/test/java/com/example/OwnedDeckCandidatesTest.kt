@@ -120,4 +120,35 @@ class OwnedDeckCandidatesTest {
         assertEquals(listOf("Lifegain"), swap.additionalTags)
         assertEquals(null, OwnedDeckCandidates.bestSwap(deck, pool, setOf("G"), false))
     }
+
+    @Test
+    fun preservesOracleTextRolesWhenCachedTagsMissToughnessReductionAndLifeGain() {
+        val moment = card("Moment of Craving", colors = "B", tags = "Spellslinger").copy(
+            manaCost = "{1}{B}", typeLine = "Instant",
+            oracleText = "Target creature gets -2/-2 until end of turn. You gain 2 life."
+        )
+        val protection = moment.copy(
+            id = "fake", oracleId = "fake", name = "Fake Your Own Death",
+            synergyTags = "Spellslinger,Artifact,Ramp,Tokens",
+            oracleText = "Until end of turn, target creature gets +2/+0 and gains an ability that creates a Treasure token."
+        )
+        val engine = card("Token engine", tags = "Tokens,Ramp")
+        val deck = DeckWithEntries(
+            DeckEntity(id = 1L, name = "Orzhov", format = "Casual"),
+            listOf(entry(moment), entry(engine))
+        )
+        assertEquals(null, OwnedDeckCandidates.bestSwap(deck, listOf(owned(protection)), setOf("W", "B"), true))
+
+        val comparableRemoval = moment.copy(
+            id = "fixture", oracleId = "fixture", name = "Same-role fixture",
+            synergyTags = "Spellslinger,Tokens",
+            oracleText = "Target creature gets −3/−3 until end of turn. You gain 3 life. Create a token."
+        )
+        val swap = requireNotNull(OwnedDeckCandidates.bestSwap(
+            deck, listOf(owned(protection), owned(comparableRemoval)), setOf("W", "B"), true
+        ))
+        assertEquals(moment.name, swap.remove.name)
+        assertEquals(comparableRemoval.name, swap.add.card.name)
+        assertEquals(listOf("Lifegain", "Removal"), swap.preservedRoles)
+    }
 }

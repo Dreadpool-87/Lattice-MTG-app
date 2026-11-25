@@ -15,7 +15,8 @@ internal data class OwnedDeckCandidate(
 internal data class OwnedDeckSwap(
     val remove: CardEntity,
     val add: OwnedDeckCandidate,
-    val additionalTags: List<String>
+    val additionalTags: List<String>,
+    val preservedRoles: List<String>
 )
 
 internal object OwnedDeckCandidates {
@@ -49,7 +50,9 @@ internal object OwnedDeckCandidates {
             .toList()
         val active = (deck.commanderEntries + deck.mainboardEntries)
             .map { it.card }.filter { it.hasVerifiedIdentity() }.distinctBy { it.oracleId }
-        val protectionTags = setOf("removal", "ramp", "card draw", "board wipe", "protection", "recursion", "countermagic")
+        val protectionTags = setOf(
+            "removal", "ramp", "card draw", "board wipe", "protection", "recursion", "countermagic", "lifegain"
+        )
         val additions = find(deck, inventory, colors, includeColorless)
 
         val choices = cuts.flatMap { cut ->
@@ -67,7 +70,7 @@ internal object OwnedDeckCandidates {
                 }
                 val extra = (addTags - cutTags).filter { it in support }.sorted()
                 val gain = addTags.sumOf { support[it] ?: 0 } - cutTags.sumOf { support[it] ?: 0 }
-                if (gain <= 0 || extra.isEmpty()) null else OwnedDeckSwap(cut, add, extra) to gain
+                if (gain <= 0 || extra.isEmpty()) null else OwnedDeckSwap(cut, add, extra, protected.sorted()) to gain
             }
         }
         return choices.sortedWith(
@@ -148,6 +151,27 @@ internal object OwnedDeckCandidates {
     private fun CardEntity.identity(): Set<String> =
         colorIdentity.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
-    private fun CardEntity.tags(): Set<String> =
-        synergyTags.split(',').map { it.trim() }.filter { it.isNotEmpty() && !it.equals("Land", true) }.toSet()
+    // Cached tags can omit combat debuffs and life gain on imported cards.
+    private val targetedToughnessReduction =
+        Regex("""\btarget [^.!?\n]{1,70}\bgets?\s+[−-](?:\d+|x)/[−-](?:\d+|x)\b""", RegexOption.IGNORE_CASE)
+    private val lifeGain =
+        Regex("""\byou gain (?:\d+|x|that much) life\b|^lifelink\b|\bgains? lifelink\b""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
+
+    private fun CardEntity.tags(): Set<String> = buildSet {
+        synergyTags.split(',').map { it.trim() }.filterNot { it.isEmpty() || it.equals("Land", true) }
+            .forEach { tag ->
+                when {
+                    tag.equals("Artifact", ignoreCase = true) && "Artifact" !in mainTypes() -> Unit
+                    tag.equals("Life gain", ignoreCase = true) || tag.equals("Lifegain", ignoreCase = true) ->
+                        add("Lifegain")
+                    else -> add(tag)
+                }
+            }
+        val text = oracleText.replace(Regex("""\([^()]*\)"""), "")
+        if (targetedToughnessReduction.containsMatchIn(text) && none { it.equals("Removal", ignoreCase = true) }) {
+            add("Removal")
+        }
+        if (lifeGain.containsMatchIn(text)) add("Lifegain")
+    }
 }

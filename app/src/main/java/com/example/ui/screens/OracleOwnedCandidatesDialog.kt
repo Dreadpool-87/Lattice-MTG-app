@@ -151,6 +151,9 @@ private fun OwnedSwapResult(
                 Text("${swap.add.availableCopies} owned outside this deck")
             }
             item {
+                if (swap.preservedRoles.isNotEmpty()) {
+                    Text("Preserves: ${swap.preservedRoles.joinToString(" · ")}")
+                }
                 Text("Better-supported deck tags: ${swap.additionalTags.joinToString(" · ")}")
                 Text("Same card types. Mana value: ${swap.remove.cmc} → ${swap.add.card.cmc}.")
                 Text(swap.add.card.oracleText)
