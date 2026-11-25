@@ -63,6 +63,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.BuildConfig
+import com.example.data.local.DeckWithEntries
 import com.example.data.local.ChatMessageEntity
 import com.example.ui.viewmodel.OracleChatViewModel
 import com.example.ui.viewmodel.OracleReplyState
@@ -82,7 +84,16 @@ fun OracleChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
+    var deckExplanation by remember { mutableStateOf<DeckWithEntries?>(null) }
     val listState = rememberLazyListState()
+
+    deckExplanation?.let { deck ->
+        OracleDeckExplanationDialog(
+            deck = deck,
+            online = uiState.isOnline && !uiState.offlineOnlyMode,
+            onDismiss = { deckExplanation = null }
+        )
+    }
 
     LaunchedEffect(uiState.messages.size, uiState.replyState) {
         val totalItems = uiState.messages.size + if (uiState.replyState is OracleReplyState.Streaming) 1 else 0
@@ -321,6 +332,17 @@ fun OracleChatScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+
+                if (BuildConfig.ORACLE_DECK_PREVIEW) {
+                    uiState.selectedContextDeck?.let { deck ->
+                        item(key = "oracle_deck_explanation") {
+                            AssistChip(
+                                onClick = { deckExplanation = deck },
+                                label = { Text("Explain deck check · Preview") }
+                            )
                         }
                     }
                 }

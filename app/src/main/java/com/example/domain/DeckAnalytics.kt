@@ -10,7 +10,8 @@ import kotlin.math.ln
 data class ValidationNote(
     val title: String,
     val detail: String,
-    val isWarning: Boolean
+    val isWarning: Boolean,
+    val copyLimitExceeded: Boolean = false
 )
 
 data class SynergyCluster(
@@ -280,7 +281,8 @@ object DeckAnalytics {
                     ValidationNote(
                         "Singleton Limit Exceeded",
                         violations.joinToString("; "),
-                        true
+                        true,
+                        copyLimitExceeded = true
                     )
                 )
             } else {
@@ -308,7 +310,8 @@ object DeckAnalytics {
                     ValidationNote(
                         "4-Copy Limit Exceeded",
                         overFour.joinToString("; "),
-                        true
+                        true,
+                        copyLimitExceeded = true
                     )
                 )
             } else if (copyLimitEntries.isNotEmpty()) {

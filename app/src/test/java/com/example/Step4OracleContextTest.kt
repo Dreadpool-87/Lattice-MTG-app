@@ -11,6 +11,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.data.local.CardEntity
+import com.example.data.local.CardMetadataStatus
 import com.example.data.local.ChatMessageEntity
 import com.example.data.local.DeckEntity
 import com.example.data.local.DeckEntryEntity
@@ -26,6 +27,7 @@ import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
+import com.example.domain.OracleDeckCheck
 import com.example.ui.screens.OracleChatScreen
 import com.example.ui.theme.LatticeMtgTheme
 import com.example.ui.viewmodel.OracleChatViewModel
@@ -63,6 +65,40 @@ class Step4OracleContextTest {
         collectorNumber = "$index",
         lang = "en"
     )
+
+    @Test
+    fun deckExplanationCountsZonesAndFlagsCrossPrintingCopiesAndColors() {
+        val commander = dummyCard(0)
+        val land = dummyCard(1).copy(name = "Island", typeLine = "Basic Land — Island")
+        val offColor = dummyCard(2).copy(colorIdentity = "R")
+        val entries = listOf(
+            Triple(commander, 1, DeckZones.COMMANDER),
+            Triple(land, 97, DeckZones.MAINBOARD),
+            Triple(offColor, 1, DeckZones.MAINBOARD),
+            Triple(offColor.copy(id = "second-printing"), 1, DeckZones.MAINBOARD),
+            Triple(dummyCard(3), 10, DeckZones.MAYBEBOARD)
+        ).map { (card, quantity, zone) ->
+            DeckEntryWithCard(DeckEntryEntity(deckId = 1L, cardId = card.id, quantity = quantity, zone = zone), card)
+        }
+        val check = OracleDeckCheck.analyze(DeckWithEntries(DeckEntity(name = "Test", format = "Commander"), entries))
+        assertEquals(100, check.cards)
+        assertEquals(97, check.lands)
+        assertTrue(check.copyWarning)
+        assertEquals("flagged", check.identity)
+        assertEquals(listOf(offColor.name), check.offColorNames)
+    }
+
+    @Test
+    fun deckExplanationDoesNotAssumeIdentityForUnknownCards() {
+        val commander = dummyCard(0)
+        val unknown = dummyCard(1).copy(oracleId = "", metadataStatus = CardMetadataStatus.UNRESOLVED)
+        val entries = listOf(
+            DeckEntryWithCard(DeckEntryEntity(deckId = 1L, cardId = commander.id, zone = DeckZones.COMMANDER), commander),
+            DeckEntryWithCard(DeckEntryEntity(deckId = 1L, cardId = unknown.id), unknown)
+        )
+        val check = OracleDeckCheck.analyze(DeckWithEntries(DeckEntity(name = "Test", format = "Commander"), entries))
+        assertEquals("incomplete", check.identity)
+    }
 
     @Test
     fun `buildDeckContextPreview distinguishes complete vs truncated mainboard and omitted zones`() {

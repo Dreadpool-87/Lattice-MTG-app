@@ -1,5 +1,7 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
+val oracleDeckPreview = providers.gradleProperty("oracleDeckPreview").orNull == "true"
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -20,6 +22,7 @@ android {
     versionName = "1.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("boolean", "ORACLE_DECK_PREVIEW", "false")
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -53,6 +56,12 @@ android {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
+      if (oracleDeckPreview) {
+        applicationIdSuffix = ".oraclepreview"
+        versionNameSuffix = "-oracle-preview"
+        buildConfigField("boolean", "ORACLE_DECK_PREVIEW", "true")
+        resValue("string", "app_name", "Lattice Oracle Preview")
+      }
     }
   }
   compileOptions {
