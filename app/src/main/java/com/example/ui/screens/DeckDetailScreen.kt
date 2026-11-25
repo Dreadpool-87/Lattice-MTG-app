@@ -459,6 +459,15 @@ fun DeckDetailScreen(
                         onDrawCard = viewModel::drawCard,
                         onPlayCard = viewModel::playCardFromHand,
                         onPutBottom = viewModel::putOnBottomForMulligan,
+                        onNextTurn = viewModel::nextTurn,
+                        onUntapAll = viewModel::untapAll,
+                        onTogglePermanentTapped = viewModel::togglePermanentTapped,
+                        onMoveBattlefieldCard = viewModel::moveBattlefieldCard,
+                        onCastCommander = viewModel::castCommander,
+                        onScryTop = viewModel::scryTop,
+                        onResolveScry = viewModel::resolveScry,
+                        onShuffleLibrary = viewModel::shuffleLibrary,
+                        onReturnFromGraveyard = viewModel::returnFromGraveyardToHand,
                         modifier = Modifier.weight(1f)
                     )
                 }
