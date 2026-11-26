@@ -150,7 +150,8 @@ class Step2ImportAndMigrationTest {
     @Test
     fun `ambiguous deck names require a printing and ownership needs printing evidence`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build().use { db ->
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
             val firstId = "aaaaaaaa-1111-4444-8888-bbbbbbbbbbbb"
             val secondId = "bbbbbbbb-1111-4444-8888-aaaaaaaaaaaa"
             val cardDao = db.cardDao()
@@ -196,13 +197,16 @@ class Step2ImportAndMigrationTest {
             )
             assertEquals(1, report.unresolvedRows.size)
             assertEquals(second.id, report.verifiedRows.single().resolvedCard?.id)
+        } finally {
+            db.close()
         }
     }
 
     @Test
     fun `custom card deletion preserves a referring deck`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build().use { db ->
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
             val card = StarterCards.cards.first().copy(
                 id = "custom-delete-test",
                 isCustom = true,
@@ -220,6 +224,8 @@ class Step2ImportAndMigrationTest {
             deckDao.deleteDeckById(deckId)
             assertEquals(1, db.cardDao().deleteUnusedCustomCard(card.id))
             assertNull(db.cardDao().getCardById(card.id))
+        } finally {
+            db.close()
         }
     }
 
