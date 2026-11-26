@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -58,7 +57,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -73,7 +71,6 @@ import com.example.ui.components.ColorIdentityRow
 import com.example.ui.components.ManaSymbolPip
 import com.example.ui.components.MainTabHeader
 import com.example.ui.viewmodel.DecksViewModel
-import java.io.IOException
 
 private val deckFormats = listOf("All", "Commander", "Modern", "Standard", "Pioneer", "Pauper", "Casual")
 
@@ -83,14 +80,11 @@ fun DecksScreen(
     snackbarHostState: SnackbarHostState,
     onOpenDeck: (Long) -> Unit,
     onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-    catalogReady: Boolean = true
+    modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val csvImport by viewModel.csvImport.collectAsStateWithLifecycle()
     val importingDeck by viewModel.importingDeck.collectAsStateWithLifecycle()
-    val assets = LocalContext.current.assets
-    var exampleLoadFailed by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
@@ -159,22 +153,6 @@ fun DecksScreen(
                             Text(stringResource(R.string.action_import_deck))
                         }
                     }
-
-                    PlaytestExamples(
-                        catalogReady = catalogReady,
-                        importingDeck = importingDeck,
-                        exampleLoadFailed = exampleLoadFailed,
-                        onSelect = { example ->
-                            try {
-                                val text = assets.open("playtest-decks/${example.asset}")
-                                    .bufferedReader().use { it.readText() }
-                                exampleLoadFailed = false
-                                viewModel.importDeck(example.name, example.format, text, onOpenDeck)
-                            } catch (_: IOException) {
-                                exampleLoadFailed = true
-                            }
-                        }
-                    )
 
                     OutlinedTextField(
                         value = uiState.searchQuery,
@@ -564,71 +542,6 @@ private fun CreateDeckDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
-}
-
-private data class PlaytestExample(val name: String, val format: String, val asset: String)
-
-private val playtestExamples = listOf(
-    PlaytestExample("Orzhov Lifegain", "Casual", "Casual-Orzhov-Lifegain.txt"),
-    PlaytestExample("Golgari Midrange", "Casual", "Casual-Golgari-Midrange.txt"),
-    PlaytestExample("Klingon Fury", "Commander", "Commander-Klingon-Fury.txt"),
-    PlaytestExample("Multiverse Reforged", "Commander", "Commander-Multiverse-Reforged.txt")
-)
-
-@Composable
-private fun PlaytestExamples(
-    catalogReady: Boolean,
-    importingDeck: Boolean,
-    exampleLoadFailed: Boolean,
-    onSelect: (PlaytestExample) -> Unit
-) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().height(48.dp)
-        ) {
-            Text("Example decks", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = { expanded = !expanded }) {
-                Text(if (expanded) "Hide" else "Show 4")
-            }
-        }
-        if (expanded) {
-            BoxWithConstraints {
-                val columnCount = if (maxWidth >= 620.dp) 4 else 2
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    playtestExamples.chunked(columnCount).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { example ->
-                                Surface(
-                                    onClick = { onSelect(example) },
-                                    enabled = catalogReady && !importingDeck,
-                                    color = MaterialTheme.colorScheme.surfaceContainer,
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.weight(1f).height(72.dp).testTag("example_${example.asset}")
-                                ) {
-                                    Column(
-                                        verticalArrangement = Arrangement.Center,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(example.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                        Text(example.format, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            val message = when {
-                exampleLoadFailed -> "Could not read this example deck."
-                !catalogReady -> "Preparing offline card data…"
-                importingDeck -> "Importing deck…"
-                else -> null
-            }
-            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        }
-    }
 }
 
 @Composable
