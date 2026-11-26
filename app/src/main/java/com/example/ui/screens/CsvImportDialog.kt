@@ -342,6 +342,9 @@ private fun CsvReviewSummarySection(report: DelverImportReport) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         report.collectionName?.let { Text("Collection saved: $it", style = MaterialTheme.typography.titleSmall) }
         report.collectionNotice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        report.lookupNotice?.let {
+            Text("$it Local matches are shown below.", color = MaterialTheme.colorScheme.error)
+        }
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
             shape = RoundedCornerShape(12.dp),

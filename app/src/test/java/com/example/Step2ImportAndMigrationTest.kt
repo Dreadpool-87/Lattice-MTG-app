@@ -39,7 +39,6 @@ import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
 import com.example.domain.CsvRowMatchStatus
-import com.example.domain.CsvLookupException
 import com.example.domain.DelverCsvImporter
 import com.example.ui.screens.VaultScreen
 import com.example.ui.screens.DecksScreen
@@ -300,7 +299,7 @@ class Step2ImportAndMigrationTest {
     }
 
     @Test
-    fun `rate limited CSV lookup is reported as a service error`() = runTest {
+    fun `rate limiting preserves local CSV matches and reports the unavailable row`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
             .allowMainThreadQueries().build()
@@ -309,12 +308,36 @@ class Step2ImportAndMigrationTest {
                 override fun isCurrentlyOnline() = true
             }
             val failure = HttpException(Response.error<ScryfallCardDto>(429, "".toResponseBody()))
-            val repo = CardRepository(db.cardDao(), createAbandonAttachmentsApi(remoteLookupFailure = failure), monitor)
-            val error = runCatching {
-                repo.importDelverCsv("Quantity,Name,Set\n1,Refute,FDN", offlineOnlyMode = false)
-            }.exceptionOrNull()
-            assertTrue(error is CsvLookupException)
-            assertTrue(error?.message.orEmpty().contains("rate limiting"))
+            val api = createAbandonAttachmentsApi(remoteLookupFailure = failure)
+            db.cardDao().storeCatalogPrinting(api.getCardBySetNumber("tla", "205").toCardEntity())
+            val repo = CardRepository(db.cardDao(), api, monitor)
+            val report = repo.importDelverCsv(
+                "Quantity,Name,Set,Collector Number\n1,Refute,FDN,\n2,Abandon Attachments,TLA,205",
+                offlineOnlyMode = false
+            )
+            assertEquals(1, report.verifiedRows.size)
+            assertEquals(2, report.totalVerifiedCopies)
+            assertEquals(1, report.unresolvedRows.size)
+            assertTrue(report.lookupNotice.orEmpty().contains("rate limiting"))
+            val exact = api.getCardBySetNumber("tla", "205").copy(
+                id = "53a4e402-2c9f-439f-9e12-6c7af5cc6200",
+                name = "Set package match",
+                set = "fdn",
+                collectorNumber = "77"
+            ).toCardEntity()
+            val packReview = DelverCsvImporter.matchAndImportRows(
+                rows = DelverCsvImporter.parseCsv("Quantity,Name,Set,Collector Number\n1,Set package match,FDN,77"),
+                cardDao = db.cardDao(),
+                scryfallApi = null,
+                canFetchOnline = true,
+                requireExactPrinting = true,
+                loadPrintingSet = { set ->
+                    assertEquals("fdn", set)
+                    db.cardDao().storeCatalogPrinting(exact)
+                },
+                keepLocalOnLookupError = true
+            )
+            assertEquals(exact.scryfallId, packReview.verifiedRows.single().resolvedCard?.scryfallId)
         } finally {
             db.close()
         }
@@ -705,13 +728,10 @@ class Step2ImportAndMigrationTest {
             composeRule.setContent {
                 LatticeMtgTheme {
                     val snackbarHostState = remember { SnackbarHostState() }
-                    val catalog = remember { androidx.compose.runtime.mutableStateOf(false) }
                     VaultScreen(
                         viewModel = viewModel,
                         snackbarHostState = snackbarHostState,
-                        onOpenSettings = {},
-                        onOpenCatalog = { catalog.value = true },
-                        onBackFromCatalog = if (catalog.value) ({ catalog.value = false }) else null
+                        onOpenSettings = {}
                     )
                 }
             }
@@ -724,7 +744,7 @@ class Step2ImportAndMigrationTest {
             assertTrue(viewModel.uiState.value.cards.isEmpty())
             composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
             composeRule.onNodeWithTag("open_csv_import_button").assertIsDisplayed()
-            composeRule.onNodeWithText("Browse catalog").performClick()
+            composeRule.onNodeWithText("Catalog").performClick()
             composeRule.onNodeWithTag("open_csv_import_button").assertDoesNotExist()
             composeRule.onNodeWithTag("type_filter_artifact").assertDoesNotExist()
             composeRule.onNodeWithTag("vault_catalog_filters").performClick()

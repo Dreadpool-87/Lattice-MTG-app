@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.PreviewLog
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.CardEntity
@@ -179,6 +180,7 @@ class DeckDetailViewModel(
 
     // === Offline Goldfish Playtest Simulator ===
     fun startNewTestHand(isMulligan: Boolean = false) {
+        PreviewLog.record("Playtest", "Opening hand requested; mulligan: $isMulligan.")
         val deck = uiState.value.deckWithEntries ?: return
         val expandedPool = deck.mainboardEntries.flatMap { entryWithCard ->
             List(entryWithCard.entry.quantity) { entryWithCard.card }
@@ -219,6 +221,7 @@ class DeckDetailViewModel(
     }
 
     fun drawCard() {
+        PreviewLog.record("Playtest", "Draw requested.")
         val current = playtestState.value
         if (current.scryCard != null) return
         if (current.library.isEmpty()) {
@@ -236,6 +239,7 @@ class DeckDetailViewModel(
     }
 
     fun nextTurn() {
+        PreviewLog.record("Playtest", "Next turn requested.")
         val current = playtestState.value
         if (current.scryCard != null) return
         val untapped = current.battlefield.map { it.copy(tapped = false) }
@@ -275,6 +279,7 @@ class DeckDetailViewModel(
     }
 
     fun playCardFromHand(index: Int) {
+        PreviewLog.record("Playtest", "Hand card play requested.")
         val current = playtestState.value
         if (index !in current.hand.indices) return
         val card = current.hand[index]
@@ -313,6 +318,7 @@ class DeckDetailViewModel(
     }
 
     fun castCommander(index: Int) {
+        PreviewLog.record("Playtest", "Commander cast requested.")
         val current = playtestState.value
         if (index !in current.commandZone.indices) return
         val commander = current.commandZone[index]

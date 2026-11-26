@@ -42,6 +42,13 @@ interface CardDao {
         AND (:rarity = 'All' OR rarity = :rarity COLLATE NOCASE)
         AND (:bookmarkedOnly = 0 OR isBookmarked = 1)
         AND (:maxCmc IS NULL OR cmc <= :maxCmc)
+        AND (:multiColorOnly = 0 OR (
+            (instr(',' || replace(cards.colors, ' ', '') || ',', ',W,') > 0) +
+            (instr(',' || replace(cards.colors, ' ', '') || ',', ',U,') > 0) +
+            (instr(',' || replace(cards.colors, ' ', '') || ',', ',B,') > 0) +
+            (instr(',' || replace(cards.colors, ' ', '') || ',', ',R,') > 0) +
+            (instr(',' || replace(cards.colors, ' ', '') || ',', ',G,') > 0)
+        ) >= 2)
         AND (:colors = '' OR EXISTS (
             SELECT 1 FROM (
                 SELECT 'W' AS symbol UNION ALL SELECT 'U' UNION ALL SELECT 'B'
@@ -63,7 +70,8 @@ interface CardDao {
         bookmarkedOnly: Boolean,
         maxCmc: Int?,
         colors: String,
-        limit: Int
+        limit: Int,
+        multiColorOnly: Boolean = false
     ): Flow<List<CardEntity>>
 
     @Query("SELECT COUNT(*) FROM cards")

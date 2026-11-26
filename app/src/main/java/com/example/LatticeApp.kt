@@ -29,7 +29,8 @@ class AppContainer(private val application: Application) {
         CardRepository(
             cardDao = database.cardDao(),
             scryfallApi = scryfallApi,
-            networkMonitor = networkMonitor
+            networkMonitor = networkMonitor,
+            offlineCatalog = offlineCatalog
         )
     }
 
@@ -62,6 +63,8 @@ class LatticeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        PreviewLog.initialize(this)
+        PreviewLog.record("App", "Started version ${BuildConfig.VERSION_CODE}.")
         container = AppContainer(this)
         appScope.launch {
             container.ensureSeeded()

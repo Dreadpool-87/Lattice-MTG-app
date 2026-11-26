@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.repository.OfflineArtworkRepository
 import com.example.data.local.CardEntity
 import com.example.data.local.VaultCollectionCard
 import com.example.domain.VaultCollectionGrouping
@@ -48,12 +49,16 @@ import com.example.domain.VaultCollectionSort
 @Composable
 internal fun VaultCollections(
     collections: Map<String, List<VaultCollectionCard>>,
-    onOpenCard: (List<CardEntity>, CardEntity) -> Unit
+    onOpenCard: (List<CardEntity>, CardEntity) -> Unit,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     var sort by rememberSaveable { mutableStateOf(VaultCollectionSort.NAME_ASC) }
     var grouping by rememberSaveable { mutableStateOf(VaultCollectionGrouping.NONE) }
-    val selectedEntries = collections[expanded].orEmpty()
+    var filters by remember { mutableStateOf(PersonalCardFilters()) }
+    val selectedEntries = remember(collections, expanded, filters) {
+        collections[expanded].orEmpty().filter { filters.matches(it.card) }
+    }
     val groups = remember(selectedEntries, sort, grouping) {
         VaultCollectionOrder.arrange(selectedEntries, sort, grouping)
     }
@@ -94,6 +99,9 @@ internal fun VaultCollections(
                 }
             }
             if (isExpanded) {
+                item(key = "collection-filters:$name") {
+                    PersonalCardFilterControls(filters, onChange = { filters = it })
+                }
                 item(key = "collection-order:$name") {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -108,6 +116,9 @@ internal fun VaultCollections(
                             onSelect = { grouping = it }, modifier = Modifier.weight(1f)
                         )
                     }
+                }
+                if (groups.isEmpty()) {
+                    item(key = "collection-empty:$name") { Text("No cards match these filters.") }
                 }
                 groups.forEach { group ->
                     group.heading?.let { heading ->
@@ -150,6 +161,7 @@ internal fun VaultCollections(
                                     entry.card.lang.takeIf { it.isNotBlank() }?.uppercase()
                                 )
                                 if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+                                OfflineImageBadge(entry.card, offlineArtwork)
                             }
                             Text("×${entry.entry.quantity}", style = MaterialTheme.typography.titleSmall)
                         }
@@ -161,7 +173,7 @@ internal fun VaultCollections(
 }
 
 @Composable
-private fun <T> CollectionOrderMenu(
+internal fun <T> CollectionOrderMenu(
     title: String,
     selected: T,
     options: List<T>,

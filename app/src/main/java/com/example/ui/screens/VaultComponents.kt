@@ -41,6 +41,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.repository.ArtworkSide
+import com.example.data.repository.OfflineArtworkRepository
+import com.example.data.repository.offlineArtworkImages
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
 import com.example.ui.components.ManaCostRow
@@ -51,7 +56,8 @@ import com.example.ui.components.RarityPill
 fun VaultCardRow(
     card: CardEntity,
     onClick: () -> Unit,
-    onToggleBookmark: () -> Unit
+    onToggleBookmark: () -> Unit,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -81,6 +87,7 @@ fun VaultCardRow(
                     )
                     ManaCostRow(manaCost = card.manaCost, pipSize = 16.dp)
                 }
+                OfflineImageBadge(card, offlineArtwork)
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = card.typeLine,
@@ -292,4 +299,26 @@ fun CreateCustomCardDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+
+@Composable
+internal fun OfflineImageBadge(card: CardEntity, repository: OfflineArtworkRepository?) {
+    if (repository == null) return
+    val context = LocalContext.current
+    val revision by repository.localImageRevision.collectAsStateWithLifecycle()
+    val label = remember(context, card, revision) {
+        val front = OfflineArtworkRepository.localFile(context, card.scryfallId, ArtworkSide.FRONT) != null
+        val back = OfflineArtworkRepository.localFile(context, card.scryfallId, ArtworkSide.BACK) != null
+        val hasKnownBack = card.offlineArtworkImages().any { it.side == ArtworkSide.BACK && !it.inferredBack }
+        when {
+            front && back -> "Front + back saved"
+            front && hasKnownBack -> "Front saved · back missing"
+            front -> "1 image saved"
+            back -> "Back saved · front missing"
+            hasKnownBack -> "2 sides · no images saved"
+            else -> "No image saved"
+        }
+    }
+    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

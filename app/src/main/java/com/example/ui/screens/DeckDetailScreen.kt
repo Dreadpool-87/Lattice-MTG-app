@@ -58,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +73,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.CardEntity
 import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckZones
+import com.example.data.repository.OfflineArtworkRepository
+import com.example.domain.VaultCollectionSort
 import com.example.ui.components.ColorIdentityRow
 import com.example.ui.components.ColorPipBreakdownBar
 import com.example.ui.components.ManaCostRow
@@ -88,7 +91,8 @@ fun DeckDetailScreen(
     onBack: () -> Unit,
     onOpenSynergyAnalyzer: (Long) -> Unit,
     cardInspector: @Composable (List<CardEntity>, CardEntity, () -> Unit) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val deckWithEntries = uiState.deckWithEntries
@@ -242,7 +246,8 @@ fun DeckDetailScreen(
                         onInspectCard = { cards, card -> inspectedCard = cards to card },
                         onAdjustQty = { cardId, delta -> viewModel.adjustQuantity(cardId, uiState.activeZone, delta) },
                         onMoveZone = { cardId, toZone -> viewModel.moveZone(cardId, uiState.activeZone, toZone) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        offlineArtwork = offlineArtwork
                     )
 
                     1 -> LazyColumn(
@@ -507,8 +512,22 @@ private fun DeckListZoneTab(
     onInspectCard: (List<CardEntity>, CardEntity) -> Unit,
     onAdjustQty: (String, Int) -> Unit,
     onMoveZone: (String, String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
+    var filters by remember { mutableStateOf(PersonalCardFilters()) }
+    var sort by rememberSaveable { mutableStateOf(VaultCollectionSort.MANA_VALUE_ASC) }
+    val ordered = remember(deckEntries, filters, sort) {
+        val filtered = deckEntries.filter { filters.matches(it.card) }
+        when (sort) {
+            VaultCollectionSort.NAME_ASC -> filtered.sortedBy { it.card.name.lowercase() }
+            VaultCollectionSort.NAME_DESC -> filtered.sortedByDescending { it.card.name.lowercase() }
+            VaultCollectionSort.QUANTITY_ASC -> filtered.sortedBy { it.entry.quantity }
+            VaultCollectionSort.QUANTITY_DESC -> filtered.sortedByDescending { it.entry.quantity }
+            VaultCollectionSort.MANA_VALUE_ASC -> filtered.sortedBy { it.card.cmc }
+        }
+    }
+    val inspectedCards = remember(ordered) { ordered.map { it.card } }
     Column(modifier = modifier) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -529,7 +548,13 @@ private fun DeckListZoneTab(
             }
         }
 
-        if (deckEntries.isEmpty()) {
+        if (deckEntries.isNotEmpty()) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+                PersonalCardFilterControls(filters, onChange = { filters = it })
+                CollectionOrderMenu("Sort", sort, VaultCollectionSort.entries, VaultCollectionSort::label, { sort = it })
+            }
+        }
+        if (ordered.isEmpty()) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -537,13 +562,13 @@ private fun DeckListZoneTab(
                     .padding(24.dp)
             ) {
                 Text(
-                    text = "No cards in ${activeZone.lowercase()}. Tap + to add cards from your offline Room vault.",
+                    text = if (deckEntries.isEmpty()) "No cards in ${activeZone.lowercase()}. Tap + to add cards."
+                        else "No cards match these filters.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
-            val ordered = remember(deckEntries) { deckEntries.sortedBy { it.card.cmc } }
             LazyColumn(
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 68.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -552,7 +577,8 @@ private fun DeckListZoneTab(
                 items(ordered, key = { it.entry.id }) { item ->
                     DeckEntryRow(
                         item = item,
-                        onInspect = { onInspectCard(ordered.map { it.card }, item.card) },
+                        offlineArtwork = offlineArtwork,
+                        onInspect = { onInspectCard(inspectedCards, item.card) },
                         onDecrement = { onAdjustQty(item.card.id, -1) },
                         onIncrement = { onAdjustQty(item.card.id, 1) },
                         onMoveZone = { toZone -> onMoveZone(item.card.id, toZone) }
@@ -569,7 +595,8 @@ private fun DeckEntryRow(
     onInspect: () -> Unit,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit,
-    onMoveZone: (String) -> Unit
+    onMoveZone: (String) -> Unit,
+    offlineArtwork: OfflineArtworkRepository?
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -620,6 +647,7 @@ private fun DeckEntryRow(
                     )
                     ManaCostRow(manaCost = item.card.manaCost, pipSize = 14.dp)
                 }
+                OfflineImageBadge(item.card, offlineArtwork)
             }
             IconButton(onClick = onDecrement, modifier = Modifier.minimumInteractiveComponentSize()) {
                 Icon(Icons.Filled.Remove, contentDescription = "Decrease quantity", modifier = Modifier.size(18.dp))

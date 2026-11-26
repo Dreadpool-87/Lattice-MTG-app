@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.PreviewLog
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.CardEntity
@@ -48,6 +49,7 @@ data class VaultUiState(
     val totalVaultCount: Int = 0,
     val query: String = "",
     val selectedColors: Set<String> = emptySet(),
+    val multiColorOnly: Boolean = false,
     val selectedType: String = "All",
     val selectedRarity: String = "All",
     val bookmarkedOnly: Boolean = false,
@@ -88,6 +90,7 @@ class VaultViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private val query = MutableStateFlow("")
+    private val multiColorOnly = MutableStateFlow(false)
     private val selectedColors = MutableStateFlow<Set<String>>(emptySet())
     private val selectedType = MutableStateFlow("All")
     private val selectedRarity = MutableStateFlow("All")
@@ -113,11 +116,13 @@ class VaultViewModel(
 
     private val searchedCardsFlow = catalogOpen.flatMapLatest { open ->
         if (!open) return@flatMapLatest flowOf(CatalogResults(emptyList(), false))
-        combine(catalogFilters, bookmarkedOnly, catalogLimit, ::Triple)
-            .flatMapLatest { (filters, bookmarked, limit) ->
+        combine(catalogFilters, bookmarkedOnly, catalogLimit, multiColorOnly) { filters, bookmarked, limit, multi ->
+            Triple(filters, bookmarked, limit to multi)
+        }.flatMapLatest { (filters, bookmarked, paging) ->
+                val (limit, multi) = paging
                 cardRepository.searchLocalCards(
                     filters.query, filters.type, filters.rarity, bookmarked, filters.maxCmc,
-                    filters.colors, limit + 1
+                    filters.colors, limit + 1, multi
                 ).map { CatalogResults(it.take(limit), it.size > limit) }
             }
     }
@@ -149,7 +154,8 @@ class VaultViewModel(
         networkMonitor.isOnline,
         preferencesRepository.offlineOnlyMode,
         preferencesRepository.showCardArt,
-        statusBanner
+        statusBanner,
+        multiColorOnly
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val catalog = values[0] as CatalogResults
@@ -176,6 +182,7 @@ class VaultViewModel(
             totalVaultCount = totalCount,
             query = q,
             selectedColors = colors,
+            multiColorOnly = values[16] as Boolean,
             selectedType = type,
             selectedRarity = rarity,
             bookmarkedOnly = bookmarked,
@@ -209,6 +216,11 @@ class VaultViewModel(
         }
     }
 
+    fun toggleMultiColorOnly() {
+        catalogLimit.value = CATALOG_PAGE_SIZE
+        multiColorOnly.value = !multiColorOnly.value
+    }
+
     fun setTypeFilter(type: String) {
         catalogLimit.value = CATALOG_PAGE_SIZE
         selectedType.value = type
@@ -233,6 +245,7 @@ class VaultViewModel(
         catalogLimit.value = CATALOG_PAGE_SIZE
         query.value = ""
         selectedColors.value = emptySet()
+        multiColorOnly.value = false
         selectedType.value = "All"
         selectedRarity.value = "All"
         bookmarkedOnly.value = false
@@ -352,6 +365,7 @@ class VaultViewModel(
                         complete = report.conflictRows.isEmpty() && report.unresolvedRows.isEmpty()
                     )
                 } else false
+                PreviewLog.record("Collection", "CSV reviewed; collection saved: $savedCollection; replacement requested: $replaceCollection.")
                 csvImportReport.value = report.copy(
                     collectionName = name.takeIf { savedCollection },
                     collectionNotice = if (!savedCollection) {
@@ -372,7 +386,8 @@ class VaultViewModel(
                 throw cancelled
             } catch (error: CsvLookupException) {
                 _csvImportError.value = error.message
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                PreviewLog.record("Collection", "CSV import failed (${error.javaClass.simpleName}).")
                 _csvImportError.value = if (csvImportReport.value == null) {
                     "Could not save the CSV import. Please try again."
                 } else {

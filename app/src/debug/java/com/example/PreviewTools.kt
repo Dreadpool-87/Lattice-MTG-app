@@ -6,19 +6,25 @@ import android.content.Context
 import android.os.Build
 import android.os.SystemClock
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build as BuildIcon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.room.withTransaction
 import com.example.data.local.CardMetadataStatus
 import com.example.data.local.DeckWithEntries
@@ -31,11 +37,8 @@ import com.example.domain.SynergyAnalyzerEngine
 import com.example.ui.screens.SettingsSectionCard
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import java.io.File
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
-import java.text.DateFormat
-import java.util.Date
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,9 +54,7 @@ internal object PreviewTools {
     private const val MULTIVERSE_PRINTINGS_PREPARED = "multiverse_printings_prepared"
     private const val LEGACY_MULTIVERSE_FINGERPRINT = "90455416515339f590a3f4b44e14807e07248d32f64d89c205f2765d2849c8ad"
     private const val SEARCH_ROUNDS = 10
-    private const val LOG_LIMIT = 12
     private val seedMutex = Mutex()
-    private val logMutex = Mutex()
 
     private data class ExampleDeck(val name: String, val format: String, val expectedCards: Int) {
         val asset = "playtest-decks/$format-${name.replace(' ', '-')}.txt"
@@ -169,44 +170,26 @@ internal object PreviewTools {
     @Composable
     fun Settings(context: Context, database: LatticeDatabase, decks: DeckRepository, catalog: OfflineCatalogRepository) {
         val scope = rememberCoroutineScope()
-        val file = remember(context) { File(context.filesDir, "preview-diagnostics.log") }
-        var log by remember { mutableStateOf("") }
+        val entries by PreviewLog.entries.collectAsStateWithLifecycle()
+        var showLog by remember { mutableStateOf(false) }
         var status by remember { mutableStateOf<String?>(null) }
         var running by remember { mutableStateOf<Job?>(null) }
-
-        LaunchedEffect(file) {
-            log = withContext(Dispatchers.IO) {
-                logMutex.withLock { if (file.isFile) file.readText() else "" }
-            }
-        }
 
         fun run(label: String, action: suspend () -> String) {
             if (running != null) return
             running = scope.launch {
                 status = "$label running…"
                 try {
-                    log = withContext(Dispatchers.IO) {
-                        val result = try {
-                            action()
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            "Failed (${error.javaClass.simpleName})."
-                        }
-                        val time = DateFormat.getDateTimeInstance().format(Date())
-                        logMutex.withLock {
-                            val previous = if (file.isFile) file.readLines() else emptyList()
-                            val updated = (previous + "$time | $label | $result").takeLast(LOG_LIMIT).joinToString("\n")
-                            file.writeText(updated)
-                            updated
-                        }
-                    }
+                    val result = withContext(Dispatchers.IO) { action() }
+                    PreviewLog.record(label, result)
                     status = null
                 } catch (cancelled: CancellationException) {
+                    PreviewLog.record(label, "Stopped.")
                     status = "Test stopped."
                     throw cancelled
-                } catch (_: Exception) {
-                    status = "Could not save the debug log."
+                } catch (error: Exception) {
+                    PreviewLog.record(label, "Failed (${error.javaClass.simpleName}).")
+                    status = "Test failed."
                 } finally {
                     running = null
                 }
@@ -247,13 +230,32 @@ internal object PreviewTools {
                 OutlinedButton(onClick = { running?.cancel() }) { Text("Stop") }
             }
             status?.let { Text(it) }
-            if (log.isNotBlank()) {
-                OutlinedButton(onClick = {
-                    context.getSystemService(ClipboardManager::class.java)
-                        .setPrimaryClip(ClipData.newPlainText("Lattice MTG Preview log", log))
-                }) { Text("Copy debug log") }
-                SelectionContainer { Text(log) }
-            }
+            OutlinedButton(
+                onClick = { showLog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Open debug log") }
+        }
+        if (showLog) {
+            AlertDialog(
+                onDismissRequest = { showLog = false },
+                title = { Text("Debug log") },
+                text = {
+                    SelectionContainer {
+                        Text(
+                            entries.asReversed().joinToString("\n").ifBlank { "No events recorded yet." },
+                            modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(enabled = entries.isNotEmpty(), onClick = {
+                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                            ClipData.newPlainText("Lattice MTG Preview log", entries.joinToString("\n"))
+                        )
+                    }) { Text("Copy log") }
+                },
+                dismissButton = { TextButton(onClick = { showLog = false }) { Text("Close") } }
+            )
         }
     }
 }

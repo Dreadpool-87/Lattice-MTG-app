@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import android.os.StatFs
+import com.example.PreviewLog
 import com.example.data.local.CardEntity
 import com.example.data.local.LatticeDatabase
 import com.example.data.remote.ScryfallApi
@@ -16,6 +17,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -133,6 +135,8 @@ class OfflineArtworkRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(ArtworkDownloadState())
     val state = _state.asStateFlow()
+    private val _localImageRevision = MutableStateFlow(0)
+    val localImageRevision = _localImageRevision.asStateFlow()
     val defaultQuality = preferences.artworkQuality
     private val fileWrites = Mutex()
     private val singleSidedPrintings = ConcurrentHashMap.newKeySet<String>()
@@ -149,6 +153,7 @@ class OfflineArtworkRepository(
         val targets = card.offlineArtworkImages().filter(::expectsImage)
         val results = targets.associateWith { saveImage(it, quality) }
         val unavailable = results.filterValues { it == ArtworkSaveResult.UNAVAILABLE }.keys
+        PreviewLog.record("Artwork", "Single printing ($quality): ${results.values.count { it == ArtworkSaveResult.SAVED }} saved, ${unavailable.size} unavailable.")
         when {
             unavailable.isEmpty() -> "Available offline."
             ArtworkSaveResult.SAVED !in results.values -> "No image could be downloaded for this printing."
@@ -212,6 +217,7 @@ class OfflineArtworkRepository(
 
             val targets = artworkImageTargets(artworkTargets(cards, selection == ArtworkSelection.AllCards))
                 .filter(::expectsImage)
+            PreviewLog.record("Artwork", "Prepared ${targets.size} images for ${selection.javaClass.simpleName} ($quality).")
             pending = targets.filter { localFile(context, it.scryfallId, it.side, quality) == null }
             val missingPrintings = cards.filter { artworkId(it.scryfallId) == null }.distinctBy { it.id }
             _state.value = ArtworkDownloadState(
@@ -263,6 +269,8 @@ class OfflineArtworkRepository(
                         } else current.unavailableDetails
                     )
                 }
+                val finished = _state.value
+                PreviewLog.record("Artwork", "Finished ($quality): ${finished.onDevice}/${finished.total} available; ${finished.unavailable} unavailable.")
                 _state.value = _state.value.copy(
                     message = if (missing == 0) "Artwork download complete." else "Artwork download finished. $missing images were unavailable."
                 )
@@ -280,9 +288,11 @@ class OfflineArtworkRepository(
             try {
                 work()
             } catch (cancelled: CancellationException) {
+                PreviewLog.record("Artwork", "Operation cancelled.")
                 _state.value = _state.value.copy(message = cancelMessage)
                 throw cancelled
             } catch (error: Exception) {
+                PreviewLog.record("Artwork", "Operation failed (${error.javaClass.simpleName}).")
                 _state.value = _state.value.copy(message = error.message ?: "Artwork download stopped.")
             } finally {
                 _state.value = _state.value.copy(busy = false, downloading = false)
@@ -366,6 +376,7 @@ class OfflineArtworkRepository(
                 coroutineContext.ensureActive()
                 if (!temporary.renameTo(destination)) throw IOException("Could not save artwork on this device.")
                 if (quality == ArtworkQuality.HD) File(directory, artworkFilename(id, card.side, ArtworkQuality.SD)).delete()
+                _localImageRevision.update { it + 1 }
                 ArtworkSaveResult.SAVED
             } finally {
                 temporary.delete()

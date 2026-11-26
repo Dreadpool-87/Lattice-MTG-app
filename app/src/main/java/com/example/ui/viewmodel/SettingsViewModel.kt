@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.PreviewLog
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.CardRepository
@@ -87,6 +88,7 @@ class SettingsViewModel(
     fun setOfflineOnlyMode(enabled: Boolean) {
         viewModelScope.launch {
             preferencesRepository.setOfflineOnlyMode(enabled)
+            PreviewLog.record("Settings", "Offline-only mode: $enabled.")
             statusMessageFlow.value = if (enabled) {
                 "Offline-Only Mode enabled."
             } else {
@@ -98,6 +100,7 @@ class SettingsViewModel(
     fun setShowCardArt(enabled: Boolean) {
         viewModelScope.launch {
             preferencesRepository.setShowCardArt(enabled)
+            PreviewLog.record("Settings", "Show card images: $enabled.")
         }
     }
 

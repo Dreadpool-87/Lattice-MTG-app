@@ -81,7 +81,6 @@ object Routes {
     const val DECKS = "decks"
     const val SYNERGY = "synergy"
     const val VAULT = "vault"
-    const val VAULT_CATALOG = "vault/catalog"
     const val FACE_TO_FACE = "face_to_face"
     const val TABLETOP = "tabletop"
     const val SETTINGS = "settings"
@@ -182,7 +181,8 @@ fun LatticeRootApp(container: AppContainer) {
         }
     }
     LaunchedEffect(currentRoute) {
-        if (currentRoute in setOf(Routes.VAULT, Routes.VAULT_CATALOG, Routes.SETTINGS)) {
+        currentRoute?.let { PreviewLog.record("Navigation", "Opened $it") }
+        if (currentRoute in setOf(Routes.VAULT, Routes.SETTINGS)) {
             try {
                 offlineCatalog.check()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -333,18 +333,9 @@ fun LatticeRootApp(container: AppContainer) {
                             offlineArtwork = container.offlineArtwork,
                             snackbarHostState = snackbarHostState,
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                            onOpenCatalog = { navController.navigate(Routes.VAULT_CATALOG) },
+                            decksViewModel = decksViewModel,
+                            onOpenDeck = { deckId -> navController.navigate(Routes.deckDetail(deckId)) },
                             newerCardData = newerCardData
-                        )
-                    }
-
-                    composable(Routes.VAULT_CATALOG) {
-                        VaultScreen(
-                            viewModel = vaultViewModel,
-                            offlineArtwork = container.offlineArtwork,
-                            snackbarHostState = snackbarHostState,
-                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                            onBackFromCatalog = { navController.popBackStack() }
                         )
                     }
 
@@ -395,6 +386,7 @@ fun LatticeRootApp(container: AppContainer) {
                         )
                         DeckDetailScreen(
                             viewModel = detailVm,
+                            offlineArtwork = container.offlineArtwork,
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
                             cardInspector = { cards, card, close ->

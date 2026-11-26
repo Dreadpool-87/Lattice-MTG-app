@@ -72,6 +72,15 @@ class ExampleRobolectricTest {
             ).first()
             assertTrue(latticeMatches.any { it.name == "Mycosynth Lattice" })
 
+            val template = StarterCards.cards.first()
+            db.cardDao().upsertAllPreservingState(listOf(
+                template.copy(id = "test-multicolor", name = "Multi test", colors = "W,U", colorIdentity = "W,U"),
+                template.copy(id = "test-identity-only", name = "Identity test", colors = "W", colorIdentity = "W,U")
+            ))
+            val multicolor = db.cardDao().searchCards("", "All", "All", false, null, "", 500, multiColorOnly = true).first()
+            assertTrue(multicolor.any { it.id == "test-multicolor" })
+            assertTrue(multicolor.none { it.id == "test-identity-only" })
+
             val decks = db.deckDao().observeAllDecksWithEntries().first()
             assertEquals(3, decks.size)
 
