@@ -201,7 +201,7 @@ fun DeckDetailScreen(
             return@Scaffold
         }
 
-        val tabs = listOf("List", "Analytics", "Synergy", "Playtest")
+        val tabs = listOf("List", "Analytics", "Synergy Map", "Playtest")
 
         Box(
             contentAlignment = Alignment.TopCenter,
@@ -219,9 +219,12 @@ fun DeckDetailScreen(
                         Tab(
                             selected = selectedTab == idx,
                             onClick = { selectedTab = idx },
-                            text = { Text(title, maxLines = 1) },
-                            modifier = Modifier.testTag("deck_tab_${title.lowercase()}")
-                        )
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("deck_tab_${title.lowercase().replace(' ', '_')}")
+                        ) {
+                            Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        }
                     }
                 }
 
