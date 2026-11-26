@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +81,12 @@ fun VaultScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val collections by viewModel.collections.collectAsStateWithLifecycle()
     val showCollections = onBackFromCatalog == null
+    if (!showCollections) {
+        DisposableEffect(viewModel) {
+            viewModel.setCatalogOpen(true)
+            onDispose { viewModel.setCatalogOpen(false) }
+        }
+    }
     var filtersExpanded by rememberSaveable { mutableStateOf(false) }
     var inspectedCard by remember { mutableStateOf<Pair<List<CardEntity>, CardEntity>?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
@@ -313,6 +320,13 @@ fun VaultScreen(
                             onToggleBookmark = { viewModel.toggleBookmark(card) }
                         )
                     }
+                    if (uiState.hasMoreCards) {
+                        item(key = "more-catalog-cards") {
+                            OutlinedButton(onClick = viewModel::loadMoreCatalogCards) {
+                                Text("Load more cards")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -377,7 +391,9 @@ internal fun CatalogCardInspector(
     val card = cards.getOrNull(index) ?: initialCard
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val extras by viewModel.inspectionExtras.collectAsStateWithLifecycle()
-    val liveCard = state.cards.firstOrNull { it.id == card.id } ?: card
+    val currentCard by remember(viewModel, card.id) { viewModel.observeCard(card.id) }
+        .collectAsStateWithLifecycle(initialValue = card)
+    val liveCard = currentCard ?: card
     val current = extras.takeIf { it.cardId == card.id }
     val art = liveCard.imageUri ?: current?.imageUri
     val context = LocalContext.current

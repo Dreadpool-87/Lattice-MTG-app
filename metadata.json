@@ -2,5 +2,5 @@
   "name": "Lattice MTG",
   "description": "Offline-first Magic: The Gathering deck builder, searchable Room card database, synergy analyzer, and tabletop companion.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

@@ -61,7 +61,15 @@ class ExampleRobolectricTest {
         try {
             StarterDecks.seedIfEmpty(db.cardDao(), db.deckDao())
 
-            val latticeMatches = db.cardDao().searchCards("Mycosynth").first()
+            val latticeMatches = db.cardDao().searchCards(
+                query = "Mycosynth",
+                type = "All",
+                rarity = "All",
+                bookmarkedOnly = false,
+                maxCmc = null,
+                colors = "",
+                limit = 100
+            ).first()
             assertTrue(latticeMatches.any { it.name == "Mycosynth Lattice" })
 
             val decks = db.deckDao().observeAllDecksWithEntries().first()

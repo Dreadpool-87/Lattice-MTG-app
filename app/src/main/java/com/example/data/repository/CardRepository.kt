@@ -15,6 +15,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
+internal class DeckCardLookupException(message: String) : IllegalArgumentException(message)
+
 sealed class SyncResult {
     data class Success(val addedOrUpdated: Int, val queryLabel: String) : SyncResult()
     data class OfflineOrError(val message: String) : SyncResult()
@@ -28,8 +30,19 @@ class CardRepository(
     val allCards: Flow<List<CardEntity>> = cardDao.observeAllCards()
     val cardCount: Flow<Int> = cardDao.observeCardCount()
 
-    fun searchLocalCards(query: String): Flow<List<CardEntity>> =
-        cardDao.searchCards(query.trim())
+    fun searchLocalCards(
+        query: String,
+        type: String,
+        rarity: String,
+        bookmarkedOnly: Boolean,
+        maxCmc: Int?,
+        colors: Set<String>,
+        limit: Int
+    ): Flow<List<CardEntity>> = cardDao.searchCards(
+        query.trim(), type, rarity, bookmarkedOnly, maxCmc, colors.joinToString(""), limit
+    )
+
+    fun observeCard(cardId: String): Flow<CardEntity?> = cardDao.observeCardById(cardId)
 
     suspend fun toggleBookmark(cardId: String, current: Boolean) {
         cardDao.updateBookmark(cardId, !current)
@@ -74,22 +87,25 @@ class CardRepository(
         return card
     }
 
-    suspend fun deleteCustomCard(cardId: String) {
-        cardDao.deleteCustomCard(cardId)
-    }
+    suspend fun deleteCustomCard(cardId: String): Boolean = cardDao.deleteUnusedCustomCard(cardId) > 0
 
     suspend fun restoreStarterCatalog() {
         cardDao.upsertAllPreservingState(StarterCards.cards)
     }
 
-    suspend fun importDelverCsv(csvContent: String, offlineOnlyMode: Boolean): DelverImportReport {
+    suspend fun importDelverCsv(
+        csvContent: String,
+        offlineOnlyMode: Boolean,
+        requireExactPrinting: Boolean = false
+    ): DelverImportReport {
         val parsedRows = withContext(Dispatchers.Default) { DelverCsvImporter.parseCsv(csvContent) }
         val canFetchOnline = !offlineOnlyMode && networkMonitor.isCurrentlyOnline()
         return DelverCsvImporter.matchAndImportRows(
             rows = parsedRows,
             cardDao = cardDao,
             scryfallApi = scryfallApi,
-            canFetchOnline = canFetchOnline
+            canFetchOnline = canFetchOnline,
+            requireExactPrinting = requireExactPrinting
         )
     }
 
@@ -154,25 +170,66 @@ class CardRepository(
                 cardDao.upsertAllPreservingState(entities)
                 SyncResult.Success(entities.size, cleanQuery)
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             SyncResult.OfflineOrError("Could not reach Scryfall (${e.localizedMessage ?: "network error"}). Using local Room cache.")
         }
     }
 
-    suspend fun resolveOrCreateCardByName(name: String, offlineOnlyMode: Boolean): CardEntity {
+    suspend fun resolveOrCreateCardByName(
+        name: String,
+        offlineOnlyMode: Boolean,
+        setCode: String? = null,
+        collectorNumber: String? = null
+    ): CardEntity {
         val trimmed = name.trim()
-        val existing = cardDao.findByExactNameIgnoreCase(trimmed)
-        if (existing != null && existing.metadataStatus != CardMetadataStatus.UNRESOLVED) {
-            return existing
+        val named = cardDao.findAllByExactNameIgnoreCase(trimmed)
+        val pool = if (setCode != null && collectorNumber != null) {
+            cardDao.findBySetAndCollector(setCode, collectorNumber)
+                .filter { it.metadataStatus == CardMetadataStatus.VERIFIED && it.matchesDeckCardName(trimmed) }
+        } else {
+            named.filter { card ->
+                card.metadataStatus != CardMetadataStatus.UNRESOLVED &&
+                    (setCode == null || card.setCode.equals(setCode, ignoreCase = true))
+            }
         }
+        // Seed entries can coexist with the catalog printing but carry no external identity.
+        val matching = if (pool.any { it.oracleId.isNotBlank() || it.scryfallId.isNotBlank() }) {
+            pool.filter { it.isCustom || it.oracleId.isNotBlank() || it.scryfallId.isNotBlank() }
+        } else pool
+        val identities = matching.distinctBy { it.oracleId.ifBlank { it.id } }
+        if (identities.size > 1) {
+            throw DeckCardLookupException("Multiple cards match \"$trimmed\". Add the set and collector number.")
+        }
+        val local = if (collectorNumber == null) matching.firstOrNull() else {
+            matching.firstOrNull { it.lang.equals("en", ignoreCase = true) } ?: matching.singleOrNull()
+        }
+        if (local != null) return local
 
         if (!offlineOnlyMode && networkMonitor.isCurrentlyOnline()) {
-            val fetched = runCatching { scryfallApi.getCardNamedExact(trimmed).toCardEntity() }.getOrNull()
-            if (fetched != null) {
+            val fetched = try {
+                if (setCode != null && collectorNumber != null) {
+                    scryfallApi.getCardBySetNumber(setCode.lowercase(), collectorNumber).toCardEntity()
+                } else {
+                    scryfallApi.getCardNamedExact(trimmed, setCode?.lowercase()).toCardEntity()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (fetched != null && (collectorNumber == null || fetched.matchesDeckCardName(trimmed))) {
                 return cardDao.upsertPreservingState(fetched)
             }
         }
 
+        if (setCode != null) {
+            val printing = listOfNotNull(setCode, collectorNumber).joinToString(" #")
+            throw DeckCardLookupException("Could not verify \"$trimmed\" ($printing). Download the set or check the decklist.")
+        }
+
+        val existing = named.firstOrNull { it.metadataStatus == CardMetadataStatus.UNRESOLVED }
         if (existing != null) return existing
 
         // Unresolved offline placeholder: keep legality & metadata explicitly Unknown.
@@ -196,4 +253,8 @@ class CardRepository(
         )
         return cardDao.upsertPreservingState(offlineCard)
     }
+
+    private fun CardEntity.matchesDeckCardName(expected: String): Boolean =
+        name.equals(expected, ignoreCase = true) ||
+            name.split(" // ").any { it.equals(expected, ignoreCase = true) }
 }

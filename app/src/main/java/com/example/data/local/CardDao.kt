@@ -38,10 +38,33 @@ interface CardDao {
                OR synergyTags LIKE '%' || :query || '%'
                OR setCode LIKE '%' || :query || '%'
                OR collectorNumber LIKE '%' || :query || '%')
-        ORDER BY isBookmarked DESC, name ASC
+        AND (:type = 'All' OR instr(LOWER(typeLine), LOWER(:type)) > 0)
+        AND (:rarity = 'All' OR rarity = :rarity COLLATE NOCASE)
+        AND (:bookmarkedOnly = 0 OR isBookmarked = 1)
+        AND (:maxCmc IS NULL OR cmc <= :maxCmc)
+        AND (:colors = '' OR EXISTS (
+            SELECT 1 FROM (
+                SELECT 'W' AS symbol UNION ALL SELECT 'U' UNION ALL SELECT 'B'
+                UNION ALL SELECT 'R' UNION ALL SELECT 'G' UNION ALL SELECT 'C'
+            ) AS mana
+            WHERE instr(:colors, mana.symbol) > 0
+              AND ((mana.symbol = 'C' AND trim(replace(colorIdentity, ',', '')) = '')
+                   OR (mana.symbol != 'C' AND
+                       instr(',' || replace(colorIdentity, ' ', '') || ',', ',' || mana.symbol || ',') > 0))
+        ))
+        ORDER BY isBookmarked DESC, name ASC, id ASC
+        LIMIT :limit
         """
     )
-    fun searchCards(query: String): Flow<List<CardEntity>>
+    fun searchCards(
+        query: String,
+        type: String,
+        rarity: String,
+        bookmarkedOnly: Boolean,
+        maxCmc: Int?,
+        colors: String,
+        limit: Int
+    ): Flow<List<CardEntity>>
 
     @Query("SELECT COUNT(*) FROM cards")
     fun observeCardCount(): Flow<Int>
@@ -51,6 +74,9 @@ interface CardDao {
 
     @Query("SELECT * FROM cards WHERE id = :id LIMIT 1")
     suspend fun getCardById(id: String): CardEntity?
+
+    @Query("SELECT * FROM cards WHERE id = :id LIMIT 1")
+    fun observeCardById(id: String): Flow<CardEntity?>
 
     @Query("SELECT * FROM cards WHERE LOWER(scryfallId) = LOWER(:scryfallId) LIMIT 1")
     suspend fun findByScryfallId(scryfallId: String): CardEntity?
@@ -80,9 +106,6 @@ interface CardDao {
 
     @Query("SELECT * FROM cards WHERE LOWER(name) = LOWER(:name) ORDER BY CASE WHEN metadataStatus = 'VERIFIED' THEN 0 ELSE 1 END, setCode ASC")
     suspend fun findAllByExactNameIgnoreCase(name: String): List<CardEntity>
-
-    @Query("SELECT * FROM cards WHERE LOWER(name) = LOWER(:name) LIMIT 1")
-    suspend fun findByExactNameIgnoreCase(name: String): CardEntity?
 
     @Query("SELECT * FROM cards WHERE id LIKE 'offline-%' AND metadataStatus = 'UNRESOLVED' AND scryfallId = '' AND LOWER(name) = LOWER(:name) LIMIT 1")
     suspend fun findOfflinePlaceholderByName(name: String): CardEntity?
@@ -153,6 +176,10 @@ interface CardDao {
     @Query("UPDATE cards SET rulingsJson = :rulingsJson WHERE id = :cardId")
     suspend fun updateRulings(cardId: String, rulingsJson: String)
 
-    @Query("DELETE FROM cards WHERE id = :cardId AND isCustom = 1")
-    suspend fun deleteCustomCard(cardId: String)
+    @Query("""
+        DELETE FROM cards WHERE id = :cardId AND isCustom = 1
+        AND NOT EXISTS (SELECT 1 FROM deck_entries WHERE cardId = :cardId)
+        AND NOT EXISTS (SELECT 1 FROM vault_collection_entries WHERE cardId = :cardId)
+    """)
+    suspend fun deleteUnusedCustomCard(cardId: String): Int
 }

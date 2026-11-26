@@ -33,6 +33,7 @@ import com.example.data.remote.ScryfallImageUrisDto
 import com.example.data.remote.ScryfallRulingsResponse
 import com.example.data.remote.ScryfallSearchResponse
 import com.example.data.repository.CardRepository
+import com.example.data.repository.DeckCardLookupException
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
@@ -147,6 +148,94 @@ class Step2ImportAndMigrationTest {
     }
 
     @Test
+    fun `ambiguous deck names require a printing and ownership needs printing evidence`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
+            val firstId = "aaaaaaaa-1111-4444-8888-bbbbbbbbbbbb"
+            val secondId = "bbbbbbbb-1111-4444-8888-aaaaaaaaaaaa"
+            val cardDao = db.cardDao()
+            val deckDao = db.deckDao()
+            val first = StarterCards.cards.first().copy(
+                id = "sf-$firstId",
+                name = "Shared Name",
+                setCode = "TLA",
+                collectorNumber = "205",
+                lang = "en",
+                oracleId = "aaaaaaaa-2222-4444-8888-bbbbbbbbbbbb",
+                scryfallId = firstId,
+                metadataStatus = CardMetadataStatus.VERIFIED
+            )
+            val second = first.copy(
+                id = "sf-$secondId",
+                setCode = "FDN",
+                collectorNumber = "86",
+                oracleId = "bbbbbbbb-2222-4444-8888-aaaaaaaaaaaa",
+                scryfallId = secondId
+            )
+            cardDao.upsertAllPreservingState(listOf(first, second))
+            val cards = CardRepository(cardDao, createAbandonAttachmentsApi(), NetworkMonitor(context))
+            val decks = DeckRepository(deckDao, cards)
+
+            val ambiguous = runCatching {
+                decks.importDeckFromText("Ambiguous", "Casual", "4 Shared Name", offlineOnlyMode = true)
+            }.exceptionOrNull()
+            assertTrue(ambiguous is DeckCardLookupException)
+            assertEquals(0, deckDao.getDeckCount())
+
+            val resolved = decks.importDeckFromText(
+                "Exact", "Casual", "4 Shared Name (FDN) 86", offlineOnlyMode = true
+            )
+            val entry = checkNotNull(deckDao.getDeckWithEntriesOnce(resolved.deckId)).mainboardEntries.single()
+            assertEquals(second.id, entry.card.id)
+            assertEquals(4, entry.entry.quantity)
+
+            val catalogCard = first.copy(id = "catalog-card-id", name = "Other Card", scryfallId = "other-printing-id")
+            cardDao.upsertAllPreservingState(
+                listOf(catalogCard, catalogCard.copy(id = "local-other-card", oracleId = "", scryfallId = ""))
+            )
+            assertEquals(catalogCard.id, cards.resolveOrCreateCardByName("Other Card", offlineOnlyMode = true).id)
+
+            val report = cards.importDelverCsv(
+                "Quantity,Name,Set,Collector Number\n1,Shared Name,,\n2,Shared Name,FDN,86",
+                offlineOnlyMode = true,
+                requireExactPrinting = true
+            )
+            assertEquals(1, report.unresolvedRows.size)
+            assertEquals(second.id, report.verifiedRows.single().resolvedCard?.id)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `custom card deletion preserves a referring deck`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
+            val card = StarterCards.cards.first().copy(
+                id = "custom-delete-test",
+                isCustom = true,
+                metadataStatus = CardMetadataStatus.CUSTOM
+            )
+            db.cardDao().insertIgnore(card)
+            val deckDao = db.deckDao()
+            val deckId = deckDao.insertDeckWithEntries(
+                DeckEntity(name = "Keep my cards", format = "Casual"),
+                listOf(DeckEntryEntity(deckId = 0, cardId = card.id, zone = DeckZones.MAINBOARD, quantity = 1))
+            )
+
+            assertEquals(0, db.cardDao().deleteUnusedCustomCard(card.id))
+            assertNotNull(deckDao.getDeckWithEntriesOnce(deckId)?.mainboardEntries?.single())
+            deckDao.deleteDeckById(deckId)
+            assertEquals(1, db.cardDao().deleteUnusedCustomCard(card.id))
+            assertNull(db.cardDao().getCardById(card.id))
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
     fun `rate limited CSV lookup is reported as a service error`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
@@ -200,12 +289,7 @@ class Step2ImportAndMigrationTest {
             }
 
             composeRule.onNodeWithTag("decks_header").assertIsDisplayed()
-            listOf(
-                "Casual-Orzhov-Lifegain.txt",
-                "Casual-Golgari-Midrange.txt",
-                "Commander-Klingon-Fury.txt",
-                "Commander-Multiverse-Reforged.txt"
-            ).forEach { asset -> composeRule.onNodeWithTag("example_$asset").assertExists() }
+            composeRule.onNodeWithText("Example decks").assertDoesNotExist()
             for (band in 0..4) {
                 composeRule.onNodeWithTag("wubrg_band_$band", useUnmergedTree = true).assertExists()
             }
@@ -570,9 +654,10 @@ class Step2ImportAndMigrationTest {
 
             val solRing = StarterCards.cards.first { it.name == "Sol Ring" }
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                viewModel.uiState.value.cards.any { it.id == solRing.id } && viewModel.uiState.value.decks.isNotEmpty()
+                viewModel.uiState.value.decks.isNotEmpty()
             }
 
+            assertTrue(viewModel.uiState.value.cards.isEmpty())
             composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
             composeRule.onNodeWithTag("open_csv_import_button").assertIsDisplayed()
             composeRule.onNodeWithText("Browse catalog").performClick()

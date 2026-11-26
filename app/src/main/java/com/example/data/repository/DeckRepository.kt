@@ -129,7 +129,7 @@ class DeckRepository(
     ): ImportDeckResult {
         var currentZone = DeckZones.MAINBOARD
         val quantities = linkedMapOf<Pair<String, String>, Int>()
-        val lineRegex = Regex("""^(\d+)x?\s+(.+?)(?:\s+\([A-Za-z0-9]+\)(?:\s+[0-9][0-9A-Za-z★-]*)?)?(?:\s+\*[FE]\*)?$""")
+        val lineRegex = Regex("""^(\d+)x?\s+(.+?)(?:\s+\(([A-Za-z0-9]+)\)(?:\s+([0-9][0-9A-Za-z★-]*))?)?(?:\s+\*[FE]\*)?$""")
 
         rawText.lines().forEach { rawLine ->
             val line = rawLine.trim()
@@ -157,7 +157,12 @@ class DeckRepository(
             val qty = match?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(1, 99) ?: 1
             val cardName = (match?.groupValues?.get(2) ?: line).trim()
             if (cardName.isNotEmpty()) {
-                val card = cardRepository.resolveOrCreateCardByName(cardName, offlineOnlyMode)
+                val card = cardRepository.resolveOrCreateCardByName(
+                    name = cardName,
+                    offlineOnlyMode = offlineOnlyMode,
+                    setCode = match?.groups?.get(3)?.value,
+                    collectorNumber = match?.groups?.get(4)?.value
+                )
                 val key = card.id to currentZone
                 quantities[key] = Math.addExact(quantities[key] ?: 0, qty)
             }

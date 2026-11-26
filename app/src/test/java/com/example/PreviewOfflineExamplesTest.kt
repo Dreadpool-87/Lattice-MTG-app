@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36], application = Application::class)
 class PreviewOfflineExamplesTest {
     @Test
-    fun `bundled catalog resolves all four sample decks offline`() = runBlocking {
+    fun `bundled catalog resolves four test decklists offline without shipping them`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = PreferencesRepository(context)
         val database = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
@@ -46,12 +46,18 @@ class PreviewOfflineExamplesTest {
                 database.deckDao(),
                 CardRepository(database.cardDao(), ScryfallApi.create(), NetworkMonitor(context))
             )
-            val paths = context.assets.list("playtest-decks").orEmpty()
-            assertEquals(4, paths.size)
+            assertTrue(context.assets.list("playtest-decks").isNullOrEmpty())
+            val paths = listOf(
+                "Casual-Orzhov-Lifegain.txt",
+                "Casual-Golgari-Midrange.txt",
+                "Commander-Klingon-Fury.txt",
+                "Commander-Multiverse-Reforged.txt"
+            )
             paths.forEach { name ->
                 val commander = name.startsWith("Commander-")
                 val format = if (commander) "Commander" else "Casual"
-                val text = context.assets.open("playtest-decks/$name").bufferedReader().use { it.readText() }
+                val text = checkNotNull(javaClass.getResourceAsStream("/playtest-decks/$name"))
+                    .bufferedReader().use { it.readText() }
                 val imported = decks.importDeckFromText(name, format, text, offlineOnlyMode = true)
                 assertEquals(if (commander) 100 else 60, imported.totalCardsImported)
             }

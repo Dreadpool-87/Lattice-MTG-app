@@ -308,7 +308,6 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.DECKS) {
                         DecksScreen(
                             viewModel = decksViewModel,
-                            catalogReady = "all" in catalogInstalled,
                             snackbarHostState = snackbarHostState,
                             onOpenDeck = { deckId ->
                                 navController.navigate(Routes.deckDetail(deckId))
