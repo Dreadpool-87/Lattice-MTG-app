@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -188,6 +189,26 @@ class Step2ImportAndMigrationTest {
             assertEquals(1, turns)
             assertEquals(1, extraDraws)
         }
+    }
+
+    @Test
+    fun `playtest marks spells payable only while the matching source is available`() {
+        val island = StarterCards.cards.first().copy(name = "Island", typeLine = "Basic Land — Island", oracleText = "")
+        val spell = island.copy(name = "Test spell", typeLine = "Instant", manaCost = "{U}")
+        val land = BattlefieldPermanent(1, island, tapped = true)
+        val state = mutableStateOf(PlaytestHandState(hand = listOf(spell), battlefield = listOf(land)))
+        composeRule.setContent {
+            LatticeMtgTheme {
+                PlaytestGoldfishTab(
+                    playtest = state.value,
+                    onDealSeven = {}, onMulligan = {}, onDrawCard = {}, onPlayCard = {}, onPutBottom = {}
+                )
+            }
+        }
+        composeRule.onNodeWithText("Need mana").assertIsNotEnabled()
+        composeRule.onNodeWithText("Produces").assertIsDisplayed()
+        composeRule.runOnIdle { state.value = state.value.copy(battlefield = listOf(land.copy(tapped = false))) }
+        composeRule.onNodeWithText("Cast").assertIsEnabled()
     }
 
     @Test

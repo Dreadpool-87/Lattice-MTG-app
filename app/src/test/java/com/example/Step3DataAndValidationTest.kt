@@ -13,6 +13,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pinch
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
@@ -340,7 +343,17 @@ class Step3DataAndValidationTest {
         details.performTouchInput { swipeRight() }
         composeRule.onNodeWithText("Show back").performScrollTo().performClick()
         composeRule.onNodeWithContentDescription("${twoSided.name} · back").performScrollTo().performClick()
-        composeRule.onNodeWithTag("sheet_enlarged_art").assertIsDisplayed()
+        val enlarged = composeRule.onNodeWithTag("sheet_enlarged_art").assertIsDisplayed()
+        enlarged.performTouchInput {
+            pinch(
+                start0 = center - Offset(width * 0.10f, 0f),
+                end0 = center - Offset(width * 0.30f, 0f),
+                start1 = center + Offset(width * 0.10f, 0f),
+                end1 = center + Offset(width * 0.30f, 0f)
+            )
+        }
+        val zoom = enlarged.fetchSemanticsNode().config[SemanticsProperties.StateDescription]
+        assertTrue(zoom.substringBefore('%').toInt() > 100)
         composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
         composeRule.onNodeWithText("Show front").assertIsDisplayed()
     }

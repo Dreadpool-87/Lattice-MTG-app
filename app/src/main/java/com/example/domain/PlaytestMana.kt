@@ -10,27 +10,47 @@ internal object PlaytestMana {
     private val colors = listOf("W", "U", "B", "R", "G", "C")
     private val basicTypes = mapOf("Plains" to "W", "Island" to "U", "Swamp" to "B", "Mountain" to "R", "Forest" to "G")
     private val token = Regex("""\{([^{}]+)\}""")
-    private val manaLine = Regex("""\{T\}: Add (.+)\.""", RegexOption.IGNORE_CASE)
+    private val manaLine = Regex("""\{T\}: Add ([^.]+)\.(.*)""", RegexOption.IGNORE_CASE)
 
     fun isLand(card: CardEntity): Boolean = cardType(card, "Land")
 
     fun isCreature(card: CardEntity): Boolean = cardType(card, "Creature")
 
-    fun entersTapped(card: CardEntity): Boolean {
+    fun entersTapped(card: CardEntity, battlefield: List<CardEntity> = emptyList()): Boolean {
         val name = Regex.escape(card.name.substringBefore(" // "))
         val selfEntersTapped = Regex(
             """^(?:this [a-z]+|$name) enters(?: the battlefield)? tapped\b""",
             RegexOption.IGNORE_CASE
         )
-        return card.oracleText.substringBefore("\n//\n").lineSequence().any {
-            selfEntersTapped.containsMatchIn(it.trim())
+        val basicTypeCondition = Regex(
+            """unless you control an? (Plains|Island|Swamp|Mountain|Forest) or an? (Plains|Island|Swamp|Mountain|Forest)\.""",
+            RegexOption.IGNORE_CASE
+        )
+        return card.oracleText.substringBefore("\n//\n").lineSequence().any { line ->
+            if (!selfEntersTapped.containsMatchIn(line.trim())) return@any false
+            val condition = basicTypeCondition.find(line) ?: return@any true
+            val types = condition.groupValues.drop(1)
+            battlefield.none { land ->
+                isLand(land) && landSubtypes(land).any { subtype ->
+                    types.any { it.equals(subtype, ignoreCase = true) }
+                }
+            }
         }
     }
 
-    fun sourceChoices(card: CardEntity, commanderColors: Set<String> = emptySet()): List<List<String>> {
+    fun sourceChoices(
+        card: CardEntity,
+        commanderColors: Set<String> = emptySet(),
+        includeManual: Boolean = false
+    ): List<List<String>> {
         val choices = card.oracleText.lineSequence().flatMap { line ->
-            val text = manaLine.matchEntire(line.trim().removeSurrounding("(", ")"))?.groupValues?.get(1)
+            val match = manaLine.matchEntire(line.trim().removeSurrounding("(", ")"))
                 ?: return@flatMap emptySequence()
+            val (text, effect) = match.destructured
+            val afterMana = effect.trimStart()
+            val requiresManual = afterMana.isNotBlank() &&
+                !afterMana.startsWith("When that mana is spent", ignoreCase = true)
+            if (requiresManual && !includeManual) return@flatMap emptySequence()
             if (text.equals("one mana of any color", ignoreCase = true)) {
                 colors.take(5).asSequence().map { listOf(it) }
             } else if (text.equals("one mana of any color in your commander's color identity", ignoreCase = true)) {
@@ -43,8 +63,7 @@ internal object PlaytestMana {
             }
         }.toMutableList()
         if (isLand(card)) {
-            val subtypes = card.typeLine.substringBefore(" // ").substringAfter("—", "").trim().split(' ')
-            choices += subtypes.mapNotNull { basicTypes[it]?.let(::listOf) }
+            choices += landSubtypes(card).mapNotNull { basicTypes[it]?.let(::listOf) }
         }
         return choices.distinct()
     }
@@ -104,6 +123,9 @@ internal object PlaytestMana {
 
         return resolve(0, pool, sources, emptySet())
     }
+
+    private fun landSubtypes(card: CardEntity): List<String> =
+        card.typeLine.substringBefore(" // ").substringAfter("—", "").trim().split(' ')
 
     private fun cardType(card: CardEntity, type: String): Boolean =
         type in card.typeLine.substringBefore(" // ").substringBefore('—').trim().split(' ')

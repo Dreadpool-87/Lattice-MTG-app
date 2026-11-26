@@ -3,10 +3,12 @@ package com.example.ui.components
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -65,12 +67,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -93,6 +101,7 @@ import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private enum class CardInspectorPage { DETAILS, RULINGS, ADD_TO_DECK }
 
@@ -826,14 +835,59 @@ private fun CardInspectorArtwork(card: CardEntity, isOnline: Boolean, artworkRev
                     ) {
                         Icon(Icons.Filled.Close, contentDescription = "Close enlarged image")
                     }
-                    AsyncImage(
-                        model = request,
-                        contentDescription = description,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.weight(1f).fillMaxWidth().testTag("sheet_enlarged_art")
+                    ZoomableCardArtwork(
+                        request = request,
+                        description = description,
+                        modifier = Modifier.weight(1f).fillMaxWidth()
                     )
                 }
             }
+        }
+    }
+}
+
+
+@Composable
+private fun ZoomableCardArtwork(request: ImageRequest, description: String, modifier: Modifier) {
+    var zoom by remember(request) { mutableStateOf(1f) }
+    var offset by remember(request) { mutableStateOf(Offset.Zero) }
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        val cardAspect = 488f / 680f
+        val fittedWidth = minOf(maxWidth, maxHeight * cardAspect)
+        val fittedHeight = fittedWidth / cardAspect
+        val widthPx = with(LocalDensity.current) { fittedWidth.toPx() }
+        val heightPx = with(LocalDensity.current) { fittedHeight.toPx() }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
+                .clipToBounds()
+                .testTag("sheet_enlarged_art")
+                .semantics { stateDescription = "${(zoom * 100).roundToInt()}% zoom" }
+                .pointerInput(request, widthPx, heightPx) {
+                    detectTransformGestures { centroid, pan, zoomChange, _ ->
+                        val nextZoom = (zoom * zoomChange).coerceIn(1f, 4f)
+                        val viewportCenter = Offset(size.width / 2f, size.height / 2f)
+                        val anchor = centroid - viewportCenter
+                        val nextOffset = anchor + (offset - anchor) * (nextZoom / zoom) + pan
+                        val maxX = ((widthPx * nextZoom - size.width) / 2f).coerceAtLeast(0f)
+                        val maxY = ((heightPx * nextZoom - size.height) / 2f).coerceAtLeast(0f)
+                        offset = Offset(nextOffset.x.coerceIn(-maxX, maxX), nextOffset.y.coerceIn(-maxY, maxY))
+                        zoom = nextZoom
+                    }
+                }
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = description,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(fittedWidth, fittedHeight)
+                    .graphicsLayer {
+                        scaleX = zoom
+                        scaleY = zoom
+                        translationX = offset.x
+                        translationY = offset.y
+                    }
+            )
         }
     }
 }

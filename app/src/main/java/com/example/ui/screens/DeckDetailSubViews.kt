@@ -55,11 +55,51 @@ import androidx.compose.ui.unit.dp
 import com.example.data.local.CardEntity
 import com.example.domain.PlaytestMana
 import com.example.ui.components.ManaCostRow
+import com.example.ui.components.ManaSymbolPip
 import com.example.ui.theme.BurnishedGold
 import com.example.ui.theme.LatticeSparkContainer
 import com.example.ui.theme.LatticeSparkGreen
 import com.example.ui.viewmodel.PlaytestDestination
 import com.example.ui.viewmodel.PlaytestHandState
+import com.example.ui.viewmodel.availableManaSources
+import com.example.ui.viewmodel.commanderTax
+
+private enum class SpellAvailability(val label: String) {
+    READY("Cast"), NEED_MANA("Need mana"), UNSUPPORTED("Unsupported cost"), MULLIGAN("Finish mulligan")
+}
+
+private fun spellAvailability(
+    manaCost: String,
+    tax: Int,
+    pendingBottoms: Int,
+    pool: List<String>,
+    sources: List<PlaytestMana.Source>
+): SpellAvailability {
+    if (pendingBottoms > 0) return SpellAvailability.MULLIGAN
+    val cost = PlaytestMana.cost(manaCost, tax) ?: return SpellAvailability.UNSUPPORTED
+    return if (PlaytestMana.pay(cost, pool, sources) != null) SpellAvailability.READY else SpellAvailability.NEED_MANA
+}
+
+@Composable
+private fun PlaytestLandMana(card: CardEntity, commanderColors: Set<String>) {
+    val (automatic, other) = remember(card, commanderColors) {
+        val automatic = PlaytestMana.sourceChoices(card, commanderColors).flatten().distinct()
+        val other = PlaytestMana.sourceChoices(card, commanderColors, includeManual = true)
+            .flatten().distinct() - automatic.toSet()
+        automatic to other
+    }
+    if (automatic.isNotEmpty()) PlaytestManaPips("Produces", automatic)
+    if (other.isNotEmpty()) PlaytestManaPips("With effect", other)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PlaytestManaPips(label: String, symbols: List<String>) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, modifier = Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        symbols.forEach { ManaSymbolPip(symbol = it, size = 19.dp, modifier = Modifier.align(Alignment.CenterVertically)) }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -94,6 +134,9 @@ fun PlaytestGoldfishTab(
         playtest.scryCard != null ||
         playtest.library.isNotEmpty()
     val pendingBottoms = (playtest.mulliganCount - playtest.bottomedThisMulligan).coerceAtLeast(0)
+    val manaSources = remember(playtest.battlefield, playtest.turnNumber, playtest.commanderColors) {
+        playtest.availableManaSources()
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
@@ -163,8 +206,11 @@ fun PlaytestGoldfishTab(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            if (PlaytestMana.isLand(permanent.card)) {
+                                PlaytestLandMana(permanent.card, playtest.commanderColors)
+                            }
                         }
-                        ManaCostRow(manaCost = permanent.card.manaCost, pipSize = 14.dp)
+                        ManaCostRow(manaCost = permanent.card.manaCost, pipSize = 19.dp)
                         Box {
                             IconButton(
                                 onClick = { menuExpanded = true },
@@ -212,6 +258,71 @@ fun PlaytestGoldfishTab(
             }
         }
 
+        if (playtest.commanderIds.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Command Zone (${playtest.commandZone.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = BurnishedGold
+                        )
+                    }
+                    if (playtest.commandZone.isEmpty()) {
+                        Text("No commander in this zone", style = MaterialTheme.typography.bodySmall)
+                    }
+                    playtest.commandZone.forEachIndexed { idx, commander ->
+                        val tax = playtest.commanderTax(commander)
+                        val availability = remember(commander.manaCost, tax, pendingBottoms, playtest.manaPool, manaSources) {
+                            spellAvailability(commander.manaCost, tax, pendingBottoms, playtest.manaPool, manaSources)
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, BurnishedGold.copy(alpha = 0.55f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(commander) }) {
+                                    Text(
+                                        text = commander.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = if (tax == 0) commander.typeLine else "Commander tax: +{$tax}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    ManaCostRow(manaCost = commander.manaCost, pipSize = 19.dp)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onCastCommander(idx) },
+                                    enabled = availability == SpellAvailability.READY,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("playtest_cast_commander_$idx")
+                                ) {
+                                    Text(availability.label, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (pendingBottoms > 0) {
             item {
                 Text("London mulligan · Put $pendingBottoms card(s) on the bottom to keep this hand.",
@@ -228,30 +339,35 @@ fun PlaytestGoldfishTab(
             }
             items(playtest.hand.size) { index ->
                 val card = playtest.hand[index]
+                val isLand = PlaytestMana.isLand(card)
+                val availability = remember(card.manaCost, pendingBottoms, playtest.manaPool, manaSources) {
+                    spellAvailability(card.manaCost, 0, pendingBottoms, playtest.manaPool, manaSources)
+                }
+                val canPlay = if (isLand) pendingBottoms == 0 && playtest.landsPlayedThisTurn == 0
+                    else availability == SpellAvailability.READY
+                val action = when {
+                    !isLand -> availability.label
+                    canPlay -> "Play land"
+                    else -> "Land played"
+                }
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer,
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    border = BorderStroke(1.dp, if (canPlay) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(card) }) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = card.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
-                                ManaCostRow(manaCost = card.manaCost, pipSize = 15.dp)
-                            }
+                            Text(
+                                text = card.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Text(
                                 text = card.typeLine,
                                 style = MaterialTheme.typography.bodySmall,
@@ -259,19 +375,21 @@ fun PlaytestGoldfishTab(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            if (isLand) PlaytestLandMana(card, playtest.commanderColors)
+                            else ManaCostRow(manaCost = card.manaCost, pipSize = 19.dp)
                         }
                         if (pendingBottoms > 0) TextButton(
                             onClick = { onPutBottom(index) },
                             modifier = Modifier.minimumInteractiveComponentSize()
                         ) {
                             Text("Bottom", style = MaterialTheme.typography.labelSmall)
-                        }
-                        Button(
+                        } else Button(
                             onClick = { onPlayCard(index) },
+                            enabled = canPlay,
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier.minimumInteractiveComponentSize()
                         ) {
-                            Text(if (PlaytestMana.isLand(card)) "Play land" else "Cast", style = MaterialTheme.typography.labelSmall)
+                            Text(action, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -384,65 +502,6 @@ fun PlaytestGoldfishTab(
                                     .testTag("playtest_scry_bottom")
                             ) {
                                 Text("Put on Bottom")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Command Zone (for Commander decks)
-        if (playtest.commanderIds.isNotEmpty()) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Command Zone (${playtest.commandZone.size})",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = BurnishedGold
-                        )
-                    }
-                    playtest.commandZone.forEachIndexed { idx, commander ->
-                        val tax = 2 * playtest.commanderCasts.getOrDefault(commander.id, 0)
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, BurnishedGold.copy(alpha = 0.55f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(commander) }) {
-                                    Text(
-                                        text = commander.name,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = commander.typeLine,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                ManaCostRow(manaCost = commander.manaCost, pipSize = 14.dp)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = { onCastCommander(idx) },
-                                    modifier = Modifier
-                                        .height(48.dp)
-                                        .testTag("playtest_cast_commander_$idx")
-                                ) {
-                                    Text(if (tax == 0) "Cast" else "Cast +{$tax}")
-                                }
                             }
                         }
                     }
