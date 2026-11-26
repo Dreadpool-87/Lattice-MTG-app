@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
@@ -29,6 +31,9 @@ import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
 import com.example.data.local.StarterCards
+import com.example.data.repository.ArtworkQuality
+import com.example.data.repository.ArtworkSide
+import com.example.data.repository.OfflineArtworkRepository
 import com.example.domain.CardFaceInfo
 import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
@@ -42,6 +47,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowDialog
+import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -292,14 +298,23 @@ class Step3DataAndValidationTest {
         val starter = StarterCards.cards.first()
         val twoSided = starter.copy(
             name = "Two-sided test card",
+            scryfallId = "e09573a5-779b-482b-9349-c3bdba770d2c",
             imageUri = null,
             cardFacesJson = CardJsonCodec.encodeFaces(listOf(
-                CardFaceInfo("Front", imageUri = "https://example.invalid/front.jpg"),
-                CardFaceInfo("Back", imageUri = "https://example.invalid/back.jpg")
+                CardFaceInfo("Front"),
+                CardFaceInfo("Back")
             ))
         )
         val neighbor = starter.copy(id = "neighbor", name = "Neighbor test card", imageUri = null)
         val selected = mutableStateOf(twoSided)
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val artworkDirectory = File(context.filesDir, "offline-card-art").apply { mkdirs() }
+        ArtworkSide.entries.forEach { side ->
+            val filename = OfflineArtworkRepository.artworkFilename(twoSided.scryfallId, side, ArtworkQuality.SD)
+            context.resources.openRawResource(R.drawable.img_empty_deckbox).use { image ->
+                File(artworkDirectory, filename).outputStream().use { image.copyTo(it) }
+            }
+        }
 
         composeRule.setContent {
             LatticeMtgTheme {
