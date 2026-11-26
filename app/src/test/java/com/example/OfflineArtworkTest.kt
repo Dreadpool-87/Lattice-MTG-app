@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.LatticeDatabase
 import com.example.data.local.StarterCards
+import com.example.data.remote.ScryfallCardDto
+import com.example.data.remote.ScryfallImageUrisDto
 import com.example.data.repository.ArtworkCard
 import com.example.data.repository.ArtworkSelection
 import com.example.data.repository.OfflineArtworkRepository
@@ -84,10 +86,15 @@ class OfflineArtworkTest {
                 .code(if (missing) 404 else 200).message(if (missing) "Not found" else "OK")
                 .body(image.toResponseBody("image/jpeg".toMediaType())).build()
         }.build()
-        val repository = OfflineArtworkRepository(context, database, preferences, catalog, client)
+        val repository = OfflineArtworkRepository(context, database, preferences, catalog, client) { id ->
+            ScryfallCardDto(id, "Prepared card", imageUris = ScryfallImageUrisDto(normal = "front image"))
+        }
         val split = StarterCards.cards.first().copy(
             id = "sf-$alternateId", scryfallId = alternateId, imageUri = null,
-            cardFacesJson = CardJsonCodec.encodeFaces(listOf(CardFaceInfo("Front"), CardFaceInfo("Back")))
+            cardFacesJson = CardJsonCodec.encodeFaces(listOf(
+                CardFaceInfo("Front"),
+                CardFaceInfo("Back", imageUri = "https://cards.scryfall.io/normal/back/2/5/$alternateId.jpg")
+            ))
         )
         sd.delete()
         hd.delete()
@@ -100,6 +107,24 @@ class OfflineArtworkTest {
             assertEquals(listOf("/normal/front/2/5/$alternateId.jpg", "/normal/back/2/5/$alternateId.jpg"), requests)
             assertArrayEquals(image, sd.readBytes())
             assertEquals(false, hd.exists())
+
+            val inferredBack = split.copy(cardFacesJson = CardJsonCodec.encodeFaces(
+                listOf(CardFaceInfo("Creature"), CardFaceInfo("Prepared spell"))
+            ))
+            database.cardDao().upsertAllPreservingState(listOf(inferredBack))
+            database.vaultCollectionDao().saveSnapshot("Prepared", mapOf(inferredBack.id to 1), replace = false, complete = true)
+            repository.prepare(ArtworkSelection.Collection)
+            val planned = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals(2, planned.total)
+            assertEquals(1, planned.remaining)
+            repository.download()
+            val finished = withTimeout(10_000) { repository.state.first { !it.busy } }
+            assertEquals("Artwork download complete.", finished.message)
+            assertEquals(1, finished.total)
+            assertEquals(1, finished.onDevice)
+            assertEquals(0, finished.unavailable)
+            assertEquals("Available offline.", repository.downloadCard(inferredBack, ArtworkQuality.SD))
+            assertEquals(3, requests.size)
 
             val singleFace = split.copy(cardFacesJson = "")
             assertEquals("Available offline.", repository.downloadCard(singleFace, ArtworkQuality.HD))
