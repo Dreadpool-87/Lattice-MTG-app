@@ -190,6 +190,12 @@ class Step2ImportAndMigrationTest {
             assertEquals(second.id, entry.card.id)
             assertEquals(4, entry.entry.quantity)
 
+            val catalogCard = first.copy(id = "catalog-card-id", name = "Other Card", scryfallId = "other-printing-id")
+            cardDao.upsertAllPreservingState(
+                listOf(catalogCard, catalogCard.copy(id = "local-other-card", oracleId = "", scryfallId = ""))
+            )
+            assertEquals(catalogCard.id, cards.resolveOrCreateCardByName("Other Card", offlineOnlyMode = true).id)
+
             val report = cards.importDelverCsv(
                 "Quantity,Name,Set,Collector Number\n1,Shared Name,,\n2,Shared Name,FDN,86",
                 offlineOnlyMode = true,

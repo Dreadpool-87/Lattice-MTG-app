@@ -185,11 +185,19 @@ class CardRepository(
     ): CardEntity {
         val trimmed = name.trim()
         val named = cardDao.findAllByExactNameIgnoreCase(trimmed)
-        val matching = named.filter { card ->
-            card.metadataStatus != CardMetadataStatus.UNRESOLVED &&
-                (setCode == null || card.setCode.equals(setCode, ignoreCase = true)) &&
-                (collectorNumber == null || card.collectorNumber.equals(collectorNumber, ignoreCase = true))
+        val pool = if (setCode != null && collectorNumber != null) {
+            cardDao.findBySetAndCollector(setCode, collectorNumber)
+                .filter { it.metadataStatus == CardMetadataStatus.VERIFIED && it.matchesDeckCardName(trimmed) }
+        } else {
+            named.filter { card ->
+                card.metadataStatus != CardMetadataStatus.UNRESOLVED &&
+                    (setCode == null || card.setCode.equals(setCode, ignoreCase = true))
+            }
         }
+        // Seed entries can coexist with the catalog printing but carry no external identity.
+        val matching = if (pool.any { it.oracleId.isNotBlank() || it.scryfallId.isNotBlank() }) {
+            pool.filter { it.isCustom || it.oracleId.isNotBlank() || it.scryfallId.isNotBlank() }
+        } else pool
         val identities = matching.distinctBy { it.oracleId.ifBlank { it.id } }
         if (identities.size > 1) {
             throw DeckCardLookupException("Multiple cards match \"$trimmed\". Add the set and collector number.")
@@ -211,7 +219,7 @@ class CardRepository(
             } catch (_: Exception) {
                 null
             }
-            if (fetched != null && fetched.name.equals(trimmed, ignoreCase = true)) {
+            if (fetched != null && (collectorNumber == null || fetched.matchesDeckCardName(trimmed))) {
                 return cardDao.upsertPreservingState(fetched)
             }
         }
@@ -245,4 +253,8 @@ class CardRepository(
         )
         return cardDao.upsertPreservingState(offlineCard)
     }
+
+    private fun CardEntity.matchesDeckCardName(expected: String): Boolean =
+        name.equals(expected, ignoreCase = true) ||
+            name.split(" // ").any { it.equals(expected, ignoreCase = true) }
 }
