@@ -65,6 +65,57 @@ class OfflineArtworkTest {
     }
 
     @Test
+    fun singleDownloadUsesSelectedQualityAndExplainsMissingImages() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        val preferences = PreferencesRepository(context)
+        val catalog = OfflineCatalogRepository(context, database, preferences)
+        val sd = File(context.filesDir, "offline-card-art/$alternateId.jpg")
+        val hd = File(context.filesDir, "offline-card-art/$alternateId-hd.jpg")
+        val image = ByteArrayOutputStream().also {
+            ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "jpeg", it)
+        }.toByteArray()
+        val requests = mutableListOf<String>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.encodedPath
+            val missing = "/back/" in request.url.encodedPath
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                .code(if (missing) 404 else 200).message(if (missing) "Not found" else "OK")
+                .body(image.toResponseBody("image/jpeg".toMediaType())).build()
+        }.build()
+        val repository = OfflineArtworkRepository(context, database, preferences, catalog, client)
+        val split = StarterCards.cards.first().copy(
+            id = "sf-$alternateId", scryfallId = alternateId, imageUri = null,
+            cardFacesJson = CardJsonCodec.encodeFaces(listOf(CardFaceInfo("Front"), CardFaceInfo("Back")))
+        )
+        sd.delete()
+        hd.delete()
+        ShadowStatFs.registerStats(context.filesDir, 10_000, 9_000, 9_000)
+        try {
+            preferences.setOfflineOnlyMode(false)
+            repository.setDefaultQuality(ArtworkQuality.SD)
+            assertEquals(ArtworkQuality.SD, repository.defaultQuality.first())
+            assertEquals("Back image unavailable. Other images are saved.", repository.downloadCard(split, ArtworkQuality.SD))
+            assertEquals(listOf("/normal/front/2/5/$alternateId.jpg", "/normal/back/2/5/$alternateId.jpg"), requests)
+            assertArrayEquals(image, sd.readBytes())
+            assertEquals(false, hd.exists())
+
+            val singleFace = split.copy(cardFacesJson = "")
+            assertEquals("Available offline.", repository.downloadCard(singleFace, ArtworkQuality.HD))
+            assertEquals("/large/front/2/5/$alternateId.jpg", requests.last())
+            assertArrayEquals(image, hd.readBytes())
+            assertEquals(false, sd.exists())
+            assertEquals(ArtworkQuality.SD, repository.defaultQuality.first())
+        } finally {
+            sd.delete()
+            hd.delete()
+            ShadowStatFs.unregisterStats(context.filesDir)
+            database.close()
+        }
+    }
+
+    @Test
     fun collectionDownloadSavesBothSidesAndUpgradesThemToHd() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()

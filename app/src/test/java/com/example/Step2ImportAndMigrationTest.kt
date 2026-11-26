@@ -43,12 +43,15 @@ import com.example.domain.DelverCsvImporter
 import com.example.ui.screens.VaultScreen
 import com.example.ui.screens.DecksScreen
 import com.example.ui.screens.DeckDetailScreen
+import com.example.ui.screens.PlaytestGoldfishTab
 import com.example.ui.screens.CatalogCardInspector
 import com.example.ui.theme.LatticeMtgTheme
 import com.example.ui.theme.WubrgTheme
 import com.example.ui.viewmodel.VaultViewModel
 import com.example.ui.viewmodel.DecksViewModel
 import com.example.ui.viewmodel.DeckDetailViewModel
+import com.example.ui.viewmodel.BattlefieldPermanent
+import com.example.ui.viewmodel.PlaytestHandState
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -144,6 +147,46 @@ class Step2ImportAndMigrationTest {
 
             override suspend fun getCardRulings(scryfallId: String): ScryfallRulingsResponse =
                 ScryfallRulingsResponse()
+        }
+    }
+
+    @Test
+    fun `playtest groups manual effects and opens a separate action log`() {
+        val card = StarterCards.cards.first()
+        var extraDraws = 0
+        var turns = 0
+        composeRule.setContent {
+            LatticeMtgTheme {
+                PlaytestGoldfishTab(
+                    playtest = PlaytestHandState(
+                        library = listOf(card),
+                        hand = listOf(card),
+                        battlefield = listOf(BattlefieldPermanent(1, card)),
+                        actionLog = listOf("Dealt opening hand.")
+                    ),
+                    onDealSeven = {},
+                    onMulligan = {},
+                    onDrawCard = { extraDraws++ },
+                    onPlayCard = {},
+                    onPutBottom = {},
+                    onNextTurn = { turns++ }
+                )
+            }
+        }
+        composeRule.onNodeWithText("Battlefield (1)").assertIsDisplayed()
+        composeRule.onNodeWithText("Hand (1)").assertIsDisplayed()
+        composeRule.onNodeWithTag("playtest_draw_button").assertDoesNotExist()
+        composeRule.onNodeWithTag("playtest_lazy_list").performScrollToNode(hasTestTag("playtest_next_turn_button"))
+        composeRule.onNodeWithTag("playtest_next_turn_button").performClick()
+        composeRule.onNodeWithTag("playtest_card_effects_button").performClick()
+        composeRule.onNodeWithTag("playtest_draw_button").performClick()
+        composeRule.onNodeWithTag("playtest_draw_button").assertDoesNotExist()
+        composeRule.onNodeWithTag("playtest_lazy_list").performScrollToNode(hasTestTag("playtest_action_log_button"))
+        composeRule.onNodeWithTag("playtest_action_log_button").performClick()
+        composeRule.onNodeWithText("Dealt opening hand.").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(1, turns)
+            assertEquals(1, extraDraws)
         }
     }
 

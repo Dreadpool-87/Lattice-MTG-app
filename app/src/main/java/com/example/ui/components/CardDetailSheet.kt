@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -58,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,17 +76,23 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
+import com.example.data.repository.ArtworkQuality
 import com.example.data.repository.ArtworkSide
+import com.example.data.repository.artworkId
+import com.example.data.repository.offlineArtworkImages
 import com.example.data.repository.OfflineArtworkRepository
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
 import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private enum class CardInspectorPage { DETAILS, RULINGS, ADD_TO_DECK }
 
@@ -103,7 +111,8 @@ fun CardInspectorSheet(
     rulings: List<CardRulingInfo> = emptyList(),
     isLoadingRulings: Boolean = false,
     onPrevious: (() -> Unit)? = null,
-    onNext: (() -> Unit)? = null
+    onNext: (() -> Unit)? = null,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     val previousAction by rememberUpdatedState(onPrevious)
     val nextAction by rememberUpdatedState(onNext)
@@ -253,8 +262,8 @@ fun CardInspectorSheet(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            if (showCardArt) {
-                CardInspectorArtwork(card, decodedFaces.firstOrNull()?.imageUri, decodedFaces.getOrNull(1)?.imageUri, isOnline)
+            if (showCardArt || offlineArtwork != null) {
+                CardArtworkActions(card, showCardArt, isOnline, offlineArtwork)
             }
 
             Surface(
@@ -695,12 +704,85 @@ private fun CardRulings(
 }
 
 @Composable
-private fun CardInspectorArtwork(card: CardEntity, frontUri: String?, backUri: String?, isOnline: Boolean) {
+private fun CardArtworkActions(
+    card: CardEntity,
+    showCardArt: Boolean,
+    isOnline: Boolean,
+    repository: OfflineArtworkRepository?
+) {
+    val scope = rememberCoroutineScope()
+    var showDownload by remember(card.id) { mutableStateOf(false) }
+    var downloading by remember(card.id) { mutableStateOf(false) }
+    var result by remember(card.id) { mutableStateOf<String?>(null) }
+    var artworkRevision by remember(card.id) { mutableStateOf(0) }
+    if (repository != null) {
+        val hasPrinting = artworkId(card.scryfallId) != null
+        val defaultQuality by repository.defaultQuality.collectAsStateWithLifecycle(initialValue = ArtworkQuality.SD)
+        OutlinedButton(
+            onClick = { showDownload = true },
+            enabled = hasPrinting && isOnline && !downloading,
+            modifier = Modifier.fillMaxWidth().testTag("sheet_download_card_image")
+        ) { Text(if (downloading) "Downloading image…" else "Download card image") }
+        val message = result ?: if (!hasPrinting) "No verified printing ID for this card." else null
+        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        if (showDownload) {
+            var overrideQuality by remember { mutableStateOf<ArtworkQuality?>(null) }
+            val quality = overrideQuality ?: defaultQuality
+            AlertDialog(
+                onDismissRequest = { showDownload = false },
+                title = { Text("Download card image") },
+                text = {
+                    Column {
+                        Text(card.name)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ArtworkQuality.entries.forEach { value ->
+                                FilterChip(
+                                    selected = quality == value,
+                                    onClick = { overrideQuality = value },
+                                    label = { Text(value.label) }
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDownload = false
+                        downloading = true
+                        result = null
+                        scope.launch {
+                            try {
+                                result = repository.downloadCard(card, quality)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                result = error.message ?: "Could not download the card image."
+                            } finally {
+                                artworkRevision++
+                                downloading = false
+                            }
+                        }
+                    }) { Text("Download ${quality.label}") }
+                },
+                dismissButton = { TextButton(onClick = { showDownload = false }) { Text("Cancel") } }
+            )
+        }
+    }
+    if (showCardArt) CardInspectorArtwork(card, isOnline, artworkRevision)
+}
+
+@Composable
+private fun CardInspectorArtwork(card: CardEntity, isOnline: Boolean, artworkRevision: Int) {
     val context = LocalContext.current
-    val front = OfflineArtworkRepository.localFile(context, card.scryfallId)
-        ?: (card.imageUri ?: frontUri)?.takeIf { it.startsWith("https://") }
-    val back = OfflineArtworkRepository.localFile(context, card.scryfallId, ArtworkSide.BACK)
-        ?: backUri?.takeIf { it.startsWith("https://") }
+    val sources = remember(context, card, isOnline, artworkRevision) {
+        card.offlineArtworkImages().associate { image ->
+            image.side to (OfflineArtworkRepository.localFile(context, card.scryfallId, image.side)
+                ?: if (isOnline) image.url(ArtworkQuality.SD) else null)
+        }
+    }
+    val front = sources[ArtworkSide.FRONT]
+    val back = sources[ArtworkSide.BACK]
     var showBack by remember(card.id) { mutableStateOf(false) }
     var enlarged by remember(card.id) { mutableStateOf(false) }
     val source = (if (showBack) back else front) ?: front ?: back ?: return

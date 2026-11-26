@@ -197,7 +197,7 @@ fun SynergyLatticeGraph(
     Column(modifier = modifier.fillMaxWidth()) {
         if (clusters.isEmpty()) {
             Text(
-                text = "Add spells and artifacts to visualize your deck's Synergy Lattice.",
+                text = "Add spells and artifacts to visualize your deck's Synergy Map.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

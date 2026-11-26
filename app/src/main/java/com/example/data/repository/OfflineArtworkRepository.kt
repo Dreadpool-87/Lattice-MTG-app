@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -41,10 +44,11 @@ data class ArtworkCard(
     val collectorNumber: String,
     val lang: String,
     val imageUri: String?,
-    val cardFacesJson: String = ""
+    val cardFacesJson: String = "",
+    val name: String = id
 )
 
-private fun CardEntity.asArtworkCard() = ArtworkCard(id, scryfallId, oracleId, setCode, collectorNumber, lang, imageUri, cardFacesJson)
+private fun CardEntity.asArtworkCard() = ArtworkCard(id, scryfallId, oracleId, setCode, collectorNumber, lang, imageUri, cardFacesJson, name)
 
 private val printingIdPattern = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -65,14 +69,29 @@ enum class ArtworkQuality(val label: String, val sizePath: String, val estimated
 
 enum class ArtworkSide(val path: String) { FRONT("front"), BACK("back") }
 
-internal data class ArtworkImage(val scryfallId: String, val side: ArtworkSide, val imageUri: String?)
+internal data class ArtworkImage(
+    val scryfallId: String,
+    val side: ArtworkSide,
+    val imageUri: String?,
+    val cardName: String
+) {
+    fun url(quality: ArtworkQuality): String? {
+        val prefix = "https://cards.scryfall.io/${quality.sizePath}/${side.path}/"
+        imageUri?.takeIf { it.startsWith(prefix) }?.let { return it }
+        val id = artworkId(scryfallId) ?: return null
+        return "$prefix${id[0]}/${id[1]}/$id.jpg"
+    }
+}
+
+internal fun CardEntity.offlineArtworkImages(): List<ArtworkImage> =
+    artworkImageTargets(listOf(asArtworkCard()))
 
 internal fun artworkImageTargets(cards: List<ArtworkCard>): List<ArtworkImage> = cards.flatMap { card ->
     val faces = CardJsonCodec.decodeFaces(card.cardFacesJson)
-    val front = ArtworkImage(card.scryfallId, ArtworkSide.FRONT, card.imageUri ?: faces.firstOrNull()?.imageUri)
+    val front = ArtworkImage(card.scryfallId, ArtworkSide.FRONT, card.imageUri ?: faces.firstOrNull()?.imageUri, card.name)
     val back = faces.getOrNull(1)
     if (back != null && (!back.imageUri.isNullOrBlank() || card.imageUri.isNullOrBlank())) {
-        listOf(front, ArtworkImage(card.scryfallId, ArtworkSide.BACK, back.imageUri))
+        listOf(front, ArtworkImage(card.scryfallId, ArtworkSide.BACK, back.imageUri, card.name))
     } else listOf(front)
 }
 
@@ -87,6 +106,7 @@ data class ArtworkDownloadState(
     val remaining: Int = 0,
     val checked: Int = 0,
     val unavailable: Int = 0,
+    val unavailableDetails: List<String> = emptyList(),
     val freeBytes: Long = 0
 ) {
     val estimatedBytes: Long get() = remaining * quality.estimatedImageBytes
@@ -104,6 +124,24 @@ class OfflineArtworkRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(ArtworkDownloadState())
     val state = _state.asStateFlow()
+    val defaultQuality = preferences.artworkQuality
+    private val fileWrites = Mutex()
+
+    suspend fun setDefaultQuality(quality: ArtworkQuality) = preferences.setArtworkQuality(quality)
+
+    suspend fun downloadCard(card: CardEntity, quality: ArtworkQuality): String = withContext(Dispatchers.IO) {
+        if (artworkId(card.scryfallId) == null) {
+            return@withContext "This card has no verified printing ID."
+        }
+        val targets = card.offlineArtworkImages()
+        val unavailable = targets.filterNot { saveImage(it, quality) }
+        when {
+            unavailable.isEmpty() -> "Available offline."
+            unavailable.size == targets.size -> "No image could be downloaded for this printing."
+            else -> unavailable.joinToString { it.side.path.replaceFirstChar(Char::uppercaseChar) } +
+                " image unavailable. Other images are saved."
+        }
+    }
     val allCardsReady = combine(catalog.manifest, catalog.installed) { manifest, installed ->
         manifest?.packs?.any { it.id == "all" } == true || "all" in installed
     }
@@ -160,6 +198,7 @@ class OfflineArtworkRepository(
 
             val targets = artworkImageTargets(artworkTargets(cards, selection == ArtworkSelection.AllCards))
             pending = targets.filter { localFile(context, it.scryfallId, it.side, quality) == null }
+            val missingPrintings = cards.filter { artworkId(it.scryfallId) == null }.distinctBy { it.id }
             _state.value = ArtworkDownloadState(
                 selection = selection,
                 quality = quality,
@@ -172,7 +211,9 @@ class OfflineArtworkRepository(
                 total = targets.size,
                 onDevice = targets.size - pending.size,
                 remaining = pending.size,
-                unavailable = cards.filter { artworkId(it.scryfallId) == null }.distinctBy { it.id }.size,
+                unavailable = missingPrintings.size,
+                unavailableDetails = missingPrintings.take(MAX_UNAVAILABLE_DETAILS)
+                    .map { "${it.name}: no verified printing ID" },
                 freeBytes = freeBytes()
             )
         }
@@ -186,21 +227,23 @@ class OfflineArtworkRepository(
             var checked = 0
             var missing = 0
             try {
-                if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Could not open artwork storage.")
-                directory.listFiles()?.filter { it.name.endsWith(".part") }?.forEach { it.delete() }
+                fileWrites.withLock {
+                    directory.listFiles()?.filter { it.name.endsWith(".part") }?.forEach { it.delete() }
+                }
                 val quality = _state.value.quality
                 for (card in batch) {
                     coroutineContext.ensureActive()
-                    if (preferences.offlineOnlyMode.first()) throw IOException("Turn off offline-only mode to download artwork.")
-                    if (freeBytes() < MAX_IMAGE_BYTES) throw IOException("Not enough free space. Finished images are still available offline.")
-                    val saved = localFile(context, card.scryfallId, card.side, quality) != null || fetch(card, quality)
+                    val saved = saveImage(card, quality)
                     checked++
                     if (!saved) missing++
                     val current = _state.value
                     _state.value = current.copy(
                         checked = checked,
                         onDevice = current.onDevice + if (saved) 1 else 0,
-                        unavailable = current.unavailable + if (saved) 0 else 1
+                        unavailable = current.unavailable + if (saved) 0 else 1,
+                        unavailableDetails = if (!saved && current.unavailableDetails.size < MAX_UNAVAILABLE_DETAILS) {
+                            current.unavailableDetails + "${card.cardName}: ${card.side.path} image unavailable"
+                        } else current.unavailableDetails
                     )
                 }
                 _state.value = _state.value.copy(
@@ -257,13 +300,18 @@ class OfflineArtworkRepository(
         }
     }
 
+    private suspend fun saveImage(card: ArtworkImage, quality: ArtworkQuality): Boolean = fileWrites.withLock {
+        if (localFile(context, card.scryfallId, card.side, quality) != null) return@withLock true
+        if (preferences.offlineOnlyMode.first()) throw IOException("Turn off offline-only mode to download artwork.")
+        if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Could not open artwork storage.")
+        if (freeBytes() < MAX_IMAGE_BYTES) throw IOException("Not enough free space. Finished images are still available offline.")
+        fetch(card, quality)
+    }
+
     private suspend fun fetch(card: ArtworkImage, quality: ArtworkQuality): Boolean {
         val id = artworkId(card.scryfallId) ?: return false
         val destination = File(directory, artworkFilename(id, card.side, quality))
-        val known = card.imageUri?.takeIf {
-            it.startsWith("https://cards.scryfall.io/${quality.sizePath}/${card.side.path}/")
-        }
-        val uri = known ?: "https://cards.scryfall.io/${quality.sizePath}/${card.side.path}/${id[0]}/${id[1]}/$id.jpg"
+        val uri = card.url(quality) ?: return false
         val request = Request.Builder().url(uri)
             .header("Accept", "image/jpeg").header("User-Agent", "Lattice-MTG-Android").build()
         return client.newCall(request).execute().use { response ->
@@ -304,6 +352,7 @@ class OfflineArtworkRepository(
     private fun freeBytes() = StatFs(context.filesDir.absolutePath).availableBytes
 
     companion object {
+        private const val MAX_UNAVAILABLE_DETAILS = 12
         private const val MAX_IMAGE_BYTES = 2 * 1024 * 1024L
 
         internal fun artworkFilename(id: String, side: ArtworkSide, quality: ArtworkQuality): String {

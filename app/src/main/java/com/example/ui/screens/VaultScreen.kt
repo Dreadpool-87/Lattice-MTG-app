@@ -76,7 +76,8 @@ fun VaultScreen(
     modifier: Modifier = Modifier,
     onOpenCatalog: () -> Unit = {},
     onBackFromCatalog: (() -> Unit)? = null,
-    newerCardData: Boolean = false
+    newerCardData: Boolean = false,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val collections by viewModel.collections.collectAsStateWithLifecycle()
@@ -347,7 +348,8 @@ fun VaultScreen(
     }
 
     inspectedCard?.let { (cards, card) ->
-        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards, allowAddToDeck = true)
+        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards,
+            allowAddToDeck = true, offlineArtwork = offlineArtwork)
     }
 
     if (showCreateCardDialog) {
@@ -383,7 +385,8 @@ internal fun CatalogCardInspector(
     initialCard: CardEntity,
     onDismiss: () -> Unit,
     cards: List<CardEntity> = listOf(initialCard),
-    allowAddToDeck: Boolean
+    allowAddToDeck: Boolean,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     var index by remember(initialCard.id, cards) {
         mutableStateOf(cards.indexOfFirst { it.id == initialCard.id })
@@ -406,6 +409,7 @@ internal fun CatalogCardInspector(
         decks = state.decks,
         isOnline = state.isOnline && !state.offlineOnlyMode,
         showCardArt = state.showCardArt,
+        offlineArtwork = offlineArtwork,
         onDismiss = {
             viewModel.cancelCardInspection()
             onDismiss()

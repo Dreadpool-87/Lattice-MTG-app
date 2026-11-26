@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import com.example.data.repository.ArtworkOption
 import com.example.data.repository.ArtworkSelection
 import com.example.data.repository.OfflineArtworkRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private enum class ArtworkScope(val label: String) {
     COLLECTION("My collection"), DECKS("My decks"), SETS("Choose sets"), ALL("All cards")
@@ -48,10 +50,27 @@ private enum class ArtworkScope(val label: String) {
 @Composable
 internal fun OfflineArtworkSettings(repository: OfflineArtworkRepository, offlineOnly: Boolean) {
     val state by repository.state.collectAsStateWithLifecycle()
+    val defaultQuality by repository.defaultQuality.collectAsStateWithLifecycle(initialValue = ArtworkQuality.SD)
+    val settingsScope = rememberCoroutineScope()
     var showDownload by remember { mutableStateOf(false) }
 
     SettingsSectionCard(title = "Offline card images", icon = Icons.Filled.FileDownload) {
-        Text("Save card images on this device for use in card details.", style = MaterialTheme.typography.bodySmall)
+        Text("Default download quality", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ArtworkQuality.entries.forEach { quality ->
+                FilterChip(
+                    selected = defaultQuality == quality,
+                    enabled = !state.busy,
+                    onClick = {
+                        repository.resetSelection()
+                        settingsScope.launch { repository.setDefaultQuality(quality) }
+                    },
+                    label = { Text(quality.label) }
+                )
+            }
+        }
+        Text("You can choose a different quality for an individual download.",
+            style = MaterialTheme.typography.bodySmall)
         if (state.downloading) {
             Text("${state.checked} checked · ${state.onDevice} images available offline",
                 style = MaterialTheme.typography.bodySmall)
@@ -90,7 +109,9 @@ private fun OfflineArtworkDialog(
             else -> emptySet()
         })
     }
-    var quality by remember { mutableStateOf(repository.state.value.quality) }
+    val defaultQuality by repository.defaultQuality.collectAsStateWithLifecycle(initialValue = ArtworkQuality.SD)
+    var qualityOverride by remember { mutableStateOf(previous?.let { repository.state.value.quality }) }
+    val quality = qualityOverride ?: defaultQuality
     val allCardsReady by repository.allCardsReady.collectAsStateWithLifecycle(initialValue = false)
     LaunchedEffect(offlineOnly) {
         if (!offlineOnly) repository.checkAvailability()
@@ -200,7 +221,7 @@ private fun OfflineArtworkDialog(
                             enabled = !state.busy,
                             onClick = {
                                 if (quality != value) {
-                                    quality = value
+                                    qualityOverride = value
                                     repository.resetSelection()
                                 }
                             },
@@ -234,7 +255,13 @@ private fun OfflineArtworkDialog(
                     }
                 }
                 if (state.unavailable > 0) {
-                    Text("${state.unavailable} selections had no available image.", style = MaterialTheme.typography.bodySmall)
+                    Text("${state.unavailable} items could not be downloaded.", style = MaterialTheme.typography.bodySmall)
+                    state.unavailableDetails.forEach { detail ->
+                        Text(detail, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (state.unavailable > state.unavailableDetails.size) {
+                        Text("And ${state.unavailable - state.unavailableDetails.size} more.", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         },

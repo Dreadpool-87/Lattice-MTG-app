@@ -201,7 +201,7 @@ fun DeckDetailScreen(
             return@Scaffold
         }
 
-        val tabs = listOf("List", "Analytics", "Lattice", "Playtest")
+        val tabs = listOf("List", "Analytics", "Synergy", "Playtest")
 
         Box(
             contentAlignment = Alignment.TopCenter,
@@ -368,7 +368,7 @@ fun DeckDetailScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
-                                    Text("Synergy Lattice", style = MaterialTheme.typography.titleMedium)
+                                    Text("Synergy Map", style = MaterialTheme.typography.titleMedium)
                                     Text(
                                         text = "Tap any synergy node to highlight connected cards inside this deck.",
                                         style = MaterialTheme.typography.bodySmall,

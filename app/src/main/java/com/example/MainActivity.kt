@@ -329,6 +329,7 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.VAULT) {
                         VaultScreen(
                             viewModel = vaultViewModel,
+                            offlineArtwork = container.offlineArtwork,
                             snackbarHostState = snackbarHostState,
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                             onOpenCatalog = { navController.navigate(Routes.VAULT_CATALOG) },
@@ -339,6 +340,7 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.VAULT_CATALOG) {
                         VaultScreen(
                             viewModel = vaultViewModel,
+                            offlineArtwork = container.offlineArtwork,
                             snackbarHostState = snackbarHostState,
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                             onBackFromCatalog = { navController.popBackStack() }
@@ -394,7 +396,8 @@ fun LatticeRootApp(container: AppContainer) {
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
                             cardInspector = { cards, card, close ->
-                                CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards, allowAddToDeck = false)
+                                CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards,
+                                    allowAddToDeck = false, offlineArtwork = container.offlineArtwork)
                             },
                             onOpenSynergyAnalyzer = { id ->
                                 synergyViewModel.selectDeck(id)

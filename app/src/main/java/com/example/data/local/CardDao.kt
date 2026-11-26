@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CardDao {
-    @Query("SELECT id, scryfallId, oracleId, setCode, collectorNumber, lang, imageUri, cardFacesJson FROM cards WHERE scryfallId != ''")
+    @Query("SELECT id, scryfallId, oracleId, setCode, collectorNumber, lang, imageUri, cardFacesJson, name FROM cards WHERE scryfallId != ''")
     suspend fun getArtworkCards(): List<ArtworkCard>
 
     @Query("""
