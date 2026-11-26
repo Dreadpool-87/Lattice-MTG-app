@@ -131,6 +131,19 @@ class OfflineArtworkTest {
             assertEquals("/large/front/2/5/$alternateId.jpg", requests.last())
             assertArrayEquals(image, hd.readBytes())
             assertEquals(false, sd.exists())
+
+            // An earlier app version may have saved another language under the right printing ID.
+            hd.writeBytes(byteArrayOf(1, 2, 3))
+            val wrongLanguage = singleFace.copy(
+                imageUri = "https://cards.scryfall.io/normal/front/1/5/$englishId.jpg"
+            )
+            assertEquals(
+                "Available offline.",
+                repository.downloadCard(wrongLanguage, ArtworkQuality.SD, replaceExisting = true)
+            )
+            assertEquals("/normal/front/2/5/$alternateId.jpg", requests.last())
+            assertArrayEquals(image, sd.readBytes())
+            assertEquals(false, hd.exists())
             assertEquals(ArtworkQuality.SD, repository.defaultQuality.first())
         } finally {
             sd.delete()

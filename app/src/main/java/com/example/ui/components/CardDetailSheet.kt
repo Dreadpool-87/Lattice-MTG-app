@@ -68,7 +68,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -104,6 +103,7 @@ import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -156,7 +156,7 @@ fun CardInspectorSheet(
         onDismissRequest = { if (page == CardInspectorPage.DETAILS) onDismiss() else backToDetails() },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
+            decorFitsSystemWindows = true
         )
     ) {
         if (page == CardInspectorPage.RULINGS) {
@@ -781,7 +781,7 @@ private fun CardArtworkActions(
                         result = null
                         scope.launch {
                             try {
-                                result = repository.downloadCard(card, quality)
+                                result = repository.downloadCard(card, quality, replaceExisting = true)
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (error: Exception) {
@@ -828,6 +828,11 @@ private fun CardInspectorArtwork(
         if (source == null) return@remember null
         ImageRequest.Builder(context)
             .data(source)
+            .apply {
+                if (source is File) {
+                    memoryCacheKey("${source.path}:${source.lastModified()}:${source.length()}")
+                }
+            }
             .networkCachePolicy(if (isOnline) CachePolicy.ENABLED else CachePolicy.DISABLED)
             .build()
     }
@@ -839,7 +844,6 @@ private fun CardInspectorArtwork(
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth()
                     .aspectRatio(488f / 680f).testTag("sheet_card_art")
-                    .clip(RoundedCornerShape(14.dp))
                     .clickable(onClickLabel = "Enlarge card image") { enlarged = true }
             )
         }
