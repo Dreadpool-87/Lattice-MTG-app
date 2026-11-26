@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.PreviewAutoPlaytest
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -451,25 +452,28 @@ fun DeckDetailScreen(
                         }
                     }
 
-                    3 -> PlaytestGoldfishTab(
-                        playtest = uiState.playtest,
-                        onDealSeven = { viewModel.startNewTestHand(isMulligan = false) },
-                        onMulligan = { viewModel.startNewTestHand(isMulligan = true) },
-                        onDrawCard = viewModel::drawCard,
-                        onPlayCard = viewModel::playCardFromHand,
-                        onInspectCard = { card -> inspectedCard = listOf(card) to card },
-                        onPutBottom = viewModel::putOnBottomForMulligan,
-                        onNextTurn = viewModel::nextTurn,
-                        onUntapAll = viewModel::untapAll,
-                        onTogglePermanentTapped = viewModel::togglePermanentTapped,
-                        onMoveBattlefieldCard = viewModel::moveBattlefieldCard,
-                        onCastCommander = viewModel::castCommander,
-                        onScryTop = viewModel::scryTop,
-                        onResolveScry = viewModel::resolveScry,
-                        onShuffleLibrary = viewModel::shuffleLibrary,
-                        onReturnFromGraveyard = viewModel::returnFromGraveyardToHand,
-                        modifier = Modifier.weight(1f)
-                    )
+                    3 -> {
+                        PreviewAutoPlaytest()
+                        PlaytestGoldfishTab(
+                            playtest = uiState.playtest,
+                            onDealSeven = { viewModel.startNewTestHand(isMulligan = false) },
+                            onMulligan = { viewModel.startNewTestHand(isMulligan = true) },
+                            onDrawCard = viewModel::drawCard,
+                            onPlayCard = viewModel::playCardFromHand,
+                            onInspectCard = { card -> inspectedCard = listOf(card) to card },
+                            onPutBottom = viewModel::putOnBottomForMulligan,
+                            onNextTurn = viewModel::nextTurn,
+                            onUntapAll = viewModel::untapAll,
+                            onTogglePermanentTapped = viewModel::togglePermanentTapped,
+                            onMoveBattlefieldCard = viewModel::moveBattlefieldCard,
+                            onCastCommander = viewModel::castCommander,
+                            onScryTop = viewModel::scryTop,
+                            onResolveScry = viewModel::resolveScry,
+                            onShuffleLibrary = viewModel::shuffleLibrary,
+                            onReturnFromGraveyard = viewModel::returnFromGraveyardToHand,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
