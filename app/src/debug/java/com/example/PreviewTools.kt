@@ -120,7 +120,7 @@ internal object PreviewTools {
     private suspend fun installMultiversePrintings(context: Context, database: LatticeDatabase) {
         val type = Types.newParameterizedType(List::class.java, ScryfallCardDto::class.java)
         val adapter = Moshi.Builder().build().adapter<List<ScryfallCardDto>>(type)
-        val cards = context.assets.open("playtest-decks/multiverse-printings.json.gz").use { file ->
+        val cards = context.assets.open("playtest-decks/multiverse-printings.pack").use { file ->
             GZIPInputStream(file).bufferedReader().use { checkNotNull(adapter.fromJson(it.readText())) }
         }
         val dao = database.cardDao()
