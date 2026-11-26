@@ -83,9 +83,10 @@ internal data class ArtworkImage(
 ) {
     fun url(quality: ArtworkQuality): String? {
         val prefix = "https://cards.scryfall.io/${quality.sizePath}/${side.path}/"
-        imageUri?.takeIf { it.startsWith(prefix) }?.let { return it }
-        val id = artworkId(scryfallId) ?: return null
-        return "$prefix${id[0]}/${id[1]}/$id.jpg"
+        val id = artworkId(scryfallId)
+            ?: return imageUri?.takeIf { it.startsWith(prefix) }
+        val exactUrl = "$prefix${id[0]}/${id[1]}/$id.jpg"
+        return imageUri?.takeIf { it.substringBefore('?') == exactUrl } ?: exactUrl
     }
 }
 
@@ -157,12 +158,16 @@ class OfflineArtworkRepository(
 
     suspend fun setDefaultQuality(quality: ArtworkQuality) = preferences.setArtworkQuality(quality)
 
-    suspend fun downloadCard(card: CardEntity, quality: ArtworkQuality): String = withContext(Dispatchers.IO) {
+    suspend fun downloadCard(
+        card: CardEntity,
+        quality: ArtworkQuality,
+        replaceExisting: Boolean = false
+    ): String = withContext(Dispatchers.IO) {
         if (artworkId(card.scryfallId) == null) {
             return@withContext "This card has no verified printing ID."
         }
         val targets = card.offlineArtworkImages().filter(::expectsImage)
-        val results = targets.associateWith { saveImage(it, quality) }
+        val results = targets.associateWith { saveImage(it, quality, replaceExisting) }
         val unavailable = results.filterValues { it == ArtworkSaveResult.UNAVAILABLE }.keys
         PreviewLog.record("Artwork", "Single printing ($quality): ${results.values.count { it == ArtworkSaveResult.SAVED }} saved, ${unavailable.size} unavailable.")
         when {
@@ -338,16 +343,26 @@ class OfflineArtworkRepository(
         }
     }
 
-    private suspend fun saveImage(card: ArtworkImage, quality: ArtworkQuality): ArtworkSaveResult = fileWrites.withLock {
+    private suspend fun saveImage(
+        card: ArtworkImage,
+        quality: ArtworkQuality,
+        replaceExisting: Boolean = false
+    ): ArtworkSaveResult = fileWrites.withLock {
         if (!expectsImage(card)) return@withLock ArtworkSaveResult.NO_BACK
-        if (localFile(context, card.scryfallId, card.side, quality) != null) return@withLock ArtworkSaveResult.SAVED
+        if (!replaceExisting && localFile(context, card.scryfallId, card.side, quality) != null) {
+            return@withLock ArtworkSaveResult.SAVED
+        }
         if (preferences.offlineOnlyMode.first()) throw IOException("Turn off offline-only mode to download artwork.")
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Could not open artwork storage.")
         if (freeBytes() < MAX_IMAGE_BYTES) throw IOException("Not enough free space. Finished images are still available offline.")
-        fetch(card, quality)
+        fetch(card, quality, replaceExisting)
     }
 
-    private suspend fun fetch(card: ArtworkImage, quality: ArtworkQuality): ArtworkSaveResult {
+    private suspend fun fetch(
+        card: ArtworkImage,
+        quality: ArtworkQuality,
+        replaceExisting: Boolean
+    ): ArtworkSaveResult {
         val id = artworkId(card.scryfallId) ?: return ArtworkSaveResult.UNAVAILABLE
         val destination = File(directory, artworkFilename(id, card.side, quality))
         val uri = card.url(quality) ?: return ArtworkSaveResult.UNAVAILABLE
@@ -386,7 +401,10 @@ class OfflineArtworkRepository(
                 }
                 coroutineContext.ensureActive()
                 if (!temporary.renameTo(destination)) throw IOException("Could not save artwork on this device.")
-                if (quality == ArtworkQuality.HD) File(directory, artworkFilename(id, card.side, ArtworkQuality.SD)).delete()
+                if (quality == ArtworkQuality.HD || replaceExisting) {
+                    val otherQuality = if (quality == ArtworkQuality.HD) ArtworkQuality.SD else ArtworkQuality.HD
+                    File(directory, artworkFilename(id, card.side, otherQuality)).delete()
+                }
                 _localImageRevision.update { it + 1 }
                 ArtworkSaveResult.SAVED
             } finally {

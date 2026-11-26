@@ -135,7 +135,9 @@ class CardRepository(
 
         return try {
             val printing = if (card.scryfallId.isNotBlank()) {
-                scryfallApi.getCardByScryfallId(card.scryfallId).toCardEntity()
+                val exact = scryfallApi.getCardByScryfallId(card.scryfallId)
+                if (!exact.id.equals(card.scryfallId, ignoreCase = true)) return null
+                exact.toCardEntity()
             } else {
                 val setCode = card.setCode.lowercase().takeUnless { it.isBlank() || it == "local" }
                 scryfallApi.getCardNamedExact(card.name, setCode).toCardEntity()

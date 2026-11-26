@@ -291,7 +291,8 @@ class Step3DataAndValidationTest {
         composeRule.onNodeWithText("Oracle Identity ID: oracle-delver-id", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("card_printing_variants_section").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("MID #47 (EN)").performScrollTo().assertIsDisplayed()
+        val lastPrinting = composeRule.onNodeWithText("MID #47 (EN)").performScrollTo().assertIsDisplayed()
+        assertEquals(lastPrinting.getUnclippedBoundsInRoot(), lastPrinting.getBoundsInRoot())
 
         composeRule.onNodeWithTag("sheet_open_rulings").performScrollTo().performClick()
         composeRule.onNodeWithTag("card_rulings_section").assertIsDisplayed()
