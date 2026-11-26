@@ -775,7 +775,7 @@ class Step2ImportAndMigrationTest {
             assertEquals("Artifact", viewModel.uiState.value.selectedType)
             composeRule.onNodeWithTag("vault_card_${solRing.id}").assertIsDisplayed()
 
-            composeRule.onNodeWithContentDescription("Back to collections").performClick()
+            composeRule.onNodeWithText("Collections").performClick()
             // Clear filters and verify CSV Import dialog flow
             viewModel.clearFilters()
             composeRule.waitForIdle()

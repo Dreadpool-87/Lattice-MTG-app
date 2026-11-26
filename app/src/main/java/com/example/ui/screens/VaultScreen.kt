@@ -221,6 +221,12 @@ fun VaultScreen(
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState())
                         ) {
+                            FilterChip(
+                                selected = uiState.multiColorOnly,
+                                onClick = viewModel::toggleMultiColorOnly,
+                                label = { Text("Multicolor") },
+                                modifier = Modifier.testTag("vault_multicolor_filter")
+                            )
                             colorFilters.forEach { code ->
                                 val selected = code in uiState.selectedColors
                                 Surface(
@@ -284,15 +290,7 @@ fun VaultScreen(
                                     modifier = Modifier.testTag("type_filter_${type.lowercase()}")
                                 )
                             }
-                        }
-                        FilterChip(
-                            selected = uiState.multiColorOnly,
-                            onClick = viewModel::toggleMultiColorOnly,
-                            label = { Text("Multicolor") },
-                            modifier = Modifier.testTag("vault_multicolor_filter")
-                        )
-                        OutlinedButton(onClick = viewModel::clearFilters) {
-                            Text("Reset filters")
+                            TextButton(onClick = viewModel::clearFilters) { Text("Reset filters") }
                         }
                     }
                 }

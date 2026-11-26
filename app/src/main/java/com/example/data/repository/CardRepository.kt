@@ -118,6 +118,7 @@ class CardRepository(
                 "Verified ${report.verifiedRows.size}; conflicts ${report.conflictRows.size}; unresolved ${report.unresolvedRows.size}; " +
                     "online lookup interrupted: ${report.lookupNotice != null}."
             )
+            report.lookupNotice?.let { PreviewLog.record("CSV lookup", it) }
         }
     }
 
