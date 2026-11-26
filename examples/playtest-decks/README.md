@@ -11,3 +11,5 @@ Lattice MTG Preview adds these four decks on first launch. They are also used as
 The Orzhov list replaces Zora, Spider Fancier with one more Starscape Cleric so every card resolves in the included offline catalog.
 
 In Preview, open **Settings → Debug tools** to restore missing example decks, check the local catalog, run a bounded catalog and deck stress test, or copy the local diagnostic log. The official build omits the example assets and debug tools.
+
+Multiverse Reforged includes the FRC and FRA printing numbers of the [stock deck](https://www.deckcipher.com/commander-precons/multiverse-reforged-frc/). Its printing metadata is bundled in the Preview from the Lattice Android card catalog's FRC and FRA set packs. An existing Preview deck is upgraded in place only when its card printings, quantities and zones match the original example.
