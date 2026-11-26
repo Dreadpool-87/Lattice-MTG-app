@@ -706,7 +706,8 @@ class Step2ImportAndMigrationTest {
     @Test
     fun catalogCommanderFilterUsesCachedFormatLegality() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build().use { db ->
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
             val dao = db.cardDao()
             val legal = StarterCards.cards.first().copy(id = "legal", scryfallId = "legal", legalFormats = "Vintage, Commander")
             dao.upsertAllPreservingState(listOf(
@@ -718,6 +719,8 @@ class Step2ImportAndMigrationTest {
 
             val cards = dao.searchCards("", "All", "All", false, null, "", 10, commanderOnly = true).first()
             assertEquals(listOf("legal"), cards.map { it.id })
+        } finally {
+            db.close()
         }
     }
 
