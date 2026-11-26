@@ -368,7 +368,7 @@ class Step3DataAndValidationTest {
         assertEquals(twoSided, selected.value)
         assertEquals("100% zoom", enlarged.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
         composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
-        composeRule.onNodeWithText("Show back").assertIsDisplayed()
+        composeRule.onNodeWithText("Show back").performScrollTo().assertIsDisplayed()
     }
     @Test
     @Config(sdk = [36], qualifiers = "w360dp-h640dp")

@@ -149,7 +149,7 @@ fun VaultScreen(
                             modifier = Modifier.testTag("open_csv_import_button")
                         ) { Text("Import CSV") }
                     }
-                } else if (showDecks && decksViewModel != null) {
+                } else if (showDecks) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { showCreateDeck = true }) { Text("New deck") }
                         OutlinedButton(onClick = { decksViewModel.clearCsvImport(); showDeckCsvImport = true }) {
@@ -407,7 +407,7 @@ fun VaultScreen(
         )
     }
 
-    if (showDecks && decksViewModel != null) {
+    if (showDecks) {
         if (showCreateDeck) {
             CreateDeckDialog(
                 onDismiss = { showCreateDeck = false },

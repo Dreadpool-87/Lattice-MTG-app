@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -757,8 +758,12 @@ class Step2ImportAndMigrationTest {
             composeRule.onNodeWithTag("collection_group_menu").performClick()
             composeRule.onNodeWithText("Color").performClick()
             composeRule.onNodeWithText("Sol Ring").assertDoesNotExist()
+            val personalList = composeRule.onNodeWithTag("vault_personal_card_lists")
+            personalList.performScrollToNode(hasText("Colorless"))
             composeRule.onNodeWithText("Colorless").performClick()
+            personalList.performScrollToNode(hasText("Sol Ring"))
             composeRule.onNodeWithText("Sol Ring").assertIsDisplayed()
+            personalList.performScrollToNode(hasText("Colorless"))
             composeRule.onNodeWithText("Colorless").performClick()
             composeRule.onNodeWithText("Sol Ring").assertDoesNotExist()
             composeRule.onNodeWithText("Catalog").performClick()
