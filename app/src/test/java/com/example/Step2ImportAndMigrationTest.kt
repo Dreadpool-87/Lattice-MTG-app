@@ -289,12 +289,7 @@ class Step2ImportAndMigrationTest {
             }
 
             composeRule.onNodeWithTag("decks_header").assertIsDisplayed()
-            listOf(
-                "Casual-Orzhov-Lifegain.txt",
-                "Casual-Golgari-Midrange.txt",
-                "Commander-Klingon-Fury.txt",
-                "Commander-Multiverse-Reforged.txt"
-            ).forEach { asset -> composeRule.onNodeWithTag("example_$asset").assertExists() }
+            composeRule.onNodeWithText("Example decks").assertDoesNotExist()
             for (band in 0..4) {
                 composeRule.onNodeWithTag("wubrg_band_$band", useUnmergedTree = true).assertExists()
             }
