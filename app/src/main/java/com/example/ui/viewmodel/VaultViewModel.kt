@@ -50,6 +50,7 @@ data class VaultUiState(
     val query: String = "",
     val selectedColors: Set<String> = emptySet(),
     val multiColorOnly: Boolean = false,
+    val commanderOnly: Boolean = false,
     val selectedType: String = "All",
     val selectedRarity: String = "All",
     val bookmarkedOnly: Boolean = false,
@@ -65,6 +66,14 @@ data class VaultUiState(
 )
 
 private const val CATALOG_PAGE_SIZE = 100
+
+private data class CatalogSearch(
+    val filters: CatalogFilters,
+    val bookmarked: Boolean,
+    val limit: Int,
+    val multicolor: Boolean,
+    val commander: Boolean
+)
 
 private data class CatalogFilters(
     val query: String,
@@ -91,6 +100,7 @@ class VaultViewModel(
 
     private val query = MutableStateFlow("")
     private val multiColorOnly = MutableStateFlow(false)
+    private val commanderOnly = MutableStateFlow(false)
     private val selectedColors = MutableStateFlow<Set<String>>(emptySet())
     private val selectedType = MutableStateFlow("All")
     private val selectedRarity = MutableStateFlow("All")
@@ -116,13 +126,11 @@ class VaultViewModel(
 
     private val searchedCardsFlow = catalogOpen.flatMapLatest { open ->
         if (!open) return@flatMapLatest flowOf(CatalogResults(emptyList(), false))
-        combine(catalogFilters, bookmarkedOnly, catalogLimit, multiColorOnly) { filters, bookmarked, limit, multi ->
-            Triple(filters, bookmarked, limit to multi)
-        }.flatMapLatest { (filters, bookmarked, paging) ->
-                val (limit, multi) = paging
+        combine(catalogFilters, bookmarkedOnly, catalogLimit, multiColorOnly, commanderOnly, ::CatalogSearch)
+            .flatMapLatest { (filters, bookmarked, limit, multi, commander) ->
                 cardRepository.searchLocalCards(
                     filters.query, filters.type, filters.rarity, bookmarked, filters.maxCmc,
-                    filters.colors, limit + 1, multi
+                    filters.colors, limit + 1, multi, commander
                 ).map { CatalogResults(it.take(limit), it.size > limit) }
             }
     }
@@ -155,7 +163,8 @@ class VaultViewModel(
         preferencesRepository.offlineOnlyMode,
         preferencesRepository.showCardArt,
         statusBanner,
-        multiColorOnly
+        multiColorOnly,
+        commanderOnly
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val catalog = values[0] as CatalogResults
@@ -183,6 +192,7 @@ class VaultViewModel(
             query = q,
             selectedColors = colors,
             multiColorOnly = values[16] as Boolean,
+            commanderOnly = values[17] as Boolean,
             selectedType = type,
             selectedRarity = rarity,
             bookmarkedOnly = bookmarked,
@@ -221,6 +231,11 @@ class VaultViewModel(
         multiColorOnly.value = !multiColorOnly.value
     }
 
+    fun toggleCommanderOnly() {
+        catalogLimit.value = CATALOG_PAGE_SIZE
+        commanderOnly.value = !commanderOnly.value
+    }
+
     fun setTypeFilter(type: String) {
         catalogLimit.value = CATALOG_PAGE_SIZE
         selectedType.value = type
@@ -246,6 +261,7 @@ class VaultViewModel(
         query.value = ""
         selectedColors.value = emptySet()
         multiColorOnly.value = false
+        commanderOnly.value = false
         selectedType.value = "All"
         selectedRarity.value = "All"
         bookmarkedOnly.value = false

@@ -704,6 +704,24 @@ class Step2ImportAndMigrationTest {
     }
 
     @Test
+    fun catalogCommanderFilterUsesCachedFormatLegality() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build().use { db ->
+            val dao = db.cardDao()
+            val legal = StarterCards.cards.first().copy(id = "legal", scryfallId = "legal", legalFormats = "Vintage, Commander")
+            dao.upsertAllPreservingState(listOf(
+                legal,
+                legal.copy(id = "banned", scryfallId = "banned", legalFormats = "Vintage"),
+                legal.copy(id = "unknown", scryfallId = "unknown", legalFormats = "Unknown"),
+                legal.copy(id = "custom", scryfallId = "", isCustom = true)
+            ))
+
+            val cards = dao.searchCards("", "All", "All", false, null, "", 10, commanderOnly = true).first()
+            assertEquals(listOf("legal"), cards.map { it.id })
+        }
+    }
+
+    @Test
     fun `vault preserves filters when opening and dismissing card details and runs csv import ui`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)

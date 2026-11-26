@@ -215,7 +215,8 @@ fun VaultScreen(
                         )
                         val active = uiState.selectedColors.size + listOf(
                             uiState.selectedType != "All", uiState.selectedRarity != "All",
-                            uiState.bookmarkedOnly, uiState.maxCmcFilter != null, uiState.multiColorOnly
+                            uiState.bookmarkedOnly, uiState.maxCmcFilter != null, uiState.multiColorOnly,
+                            uiState.commanderOnly
                         ).count { it }
                         FilterChip(
                             selected = filtersExpanded,
@@ -237,6 +238,12 @@ fun VaultScreen(
                                 onClick = viewModel::toggleMultiColorOnly,
                                 label = { Text("Multicolor") },
                                 modifier = Modifier.testTag("vault_multicolor_filter")
+                            )
+                            FilterChip(
+                                selected = uiState.commanderOnly,
+                                onClick = viewModel::toggleCommanderOnly,
+                                label = { Text("Commander legal") },
+                                modifier = Modifier.testTag("vault_commander_filter")
                             )
                             colorFilters.forEach { code ->
                                 val selected = code in uiState.selectedColors

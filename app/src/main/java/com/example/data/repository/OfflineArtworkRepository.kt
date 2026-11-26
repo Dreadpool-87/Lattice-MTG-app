@@ -132,6 +132,17 @@ class OfflineArtworkRepository(
     private val lookupPrinting: suspend (String) -> ScryfallCardDto = ScryfallApi.create()::getCardByScryfallId
 ) {
     private val directory = File(context.filesDir, "offline-card-art")
+    private val doubleFacedOracleIds by lazy {
+        context.assets.open("double-faced-oracle-ids.txt").bufferedReader().useLines { lines ->
+            lines.filterNot { it.startsWith("#") }.toSet()
+        }
+    }
+
+    internal fun hasBackSide(card: CardEntity): Boolean {
+        if (localFile(context, card.scryfallId, ArtworkSide.BACK) != null) return true
+        val back = card.offlineArtworkImages().firstOrNull { it.side == ArtworkSide.BACK } ?: return false
+        return !back.inferredBack || card.oracleId in doubleFacedOracleIds
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(ArtworkDownloadState())
     val state = _state.asStateFlow()

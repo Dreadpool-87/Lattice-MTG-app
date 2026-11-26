@@ -137,6 +137,11 @@ fun CardInspectorSheet(
     val decodedFaces = remember(card.cardFacesJson) {
         CardJsonCodec.decodeFaces(card.cardFacesJson)
     }
+    val imageRevision = offlineArtwork?.localImageRevision?.collectAsStateWithLifecycle()?.value
+    val hasBackSide = remember(offlineArtwork, card, imageRevision) {
+        offlineArtwork?.hasBackSide(card)
+            ?: card.offlineArtworkImages().any { it.side == ArtworkSide.BACK && !it.inferredBack }
+    }
     val effectiveRulings = remember(rulings, card.rulingsJson) {
         if (rulings.isNotEmpty()) rulings else CardJsonCodec.decodeRulings(card.rulingsJson)
     }
@@ -276,7 +281,7 @@ fun CardInspectorSheet(
             }
             Spacer(modifier = Modifier.height(8.dp))
             if (showCardArt || offlineArtwork != null) {
-                CardArtworkActions(card, showCardArt, isOnline, offlineArtwork, onPrevious, onNext)
+                CardArtworkActions(card, showCardArt, isOnline, offlineArtwork, hasBackSide, onPrevious, onNext)
             }
 
             Surface(
@@ -356,7 +361,7 @@ fun CardInspectorSheet(
                                 .testTag("card_faces_section")
                         ) {
                             Text(
-                                text = "Card Faces (${decodedFaces.size})",
+                                text = if (hasBackSide) "Card sides" else "Rules text",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -373,7 +378,11 @@ fun CardInspectorSheet(
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Text(
-                                                text = "Face ${index + 1}: ${face.name}",
+                                                text = when {
+                                                    hasBackSide && index == 0 -> "Front · ${face.name}"
+                                                    hasBackSide && index == 1 -> "Back · ${face.name}"
+                                                    else -> face.name
+                                                },
                                                 style = MaterialTheme.typography.titleSmall,
                                                 color = MaterialTheme.colorScheme.onSurface,
                                                 modifier = Modifier.weight(1f)
@@ -722,6 +731,7 @@ private fun CardArtworkActions(
     showCardArt: Boolean,
     isOnline: Boolean,
     repository: OfflineArtworkRepository?,
+    hasBackSide: Boolean,
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?
 ) {
@@ -784,7 +794,9 @@ private fun CardArtworkActions(
             )
         }
     }
-    if (showCardArt) CardInspectorArtwork(card, isOnline, artworkRevision, onPrevious, onNext)
+    if (showCardArt) {
+        CardInspectorArtwork(card, isOnline, artworkRevision, hasBackSide, onPrevious, onNext)
+    }
 }
 
 @Composable
@@ -792,12 +804,13 @@ private fun CardInspectorArtwork(
     card: CardEntity,
     isOnline: Boolean,
     artworkRevision: Int,
+    hasBackSide: Boolean,
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?
 ) {
     val context = LocalContext.current
-    val sources = remember(context, card, isOnline, artworkRevision) {
-        card.offlineArtworkImages().associate { image ->
+    val sources = remember(context, card, isOnline, artworkRevision, hasBackSide) {
+        card.offlineArtworkImages().filter { it.side == ArtworkSide.FRONT || hasBackSide }.associate { image ->
             image.side to (OfflineArtworkRepository.localFile(context, card.scryfallId, image.side)
                 ?: if (isOnline) image.url(ArtworkQuality.SD) else null)
         }
@@ -807,7 +820,7 @@ private fun CardInspectorArtwork(
     var showBack by remember(card.id) { mutableStateOf(false) }
     var enlarged by remember { mutableStateOf(false) }
     val source = (if (showBack) back else front) ?: front ?: back
-    val description = if (back == null) card.name else "${card.name} · ${if (showBack || front == null) "back" else "front"}"
+    val description = if (!hasBackSide) card.name else "${card.name} · ${if (showBack || front == null) "back" else "front"}"
     val request = remember(context, source, isOnline) {
         if (source == null) return@remember null
         ImageRequest.Builder(context)
@@ -850,8 +863,16 @@ private fun CardInspectorArtwork(
                     ) {
                         Icon(Icons.Filled.Close, contentDescription = "Close enlarged image")
                     }
+                    if (front != null && back != null) {
+                        TextButton(
+                            onClick = { showBack = !showBack },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text(if (showBack) "Show front" else "Show back")
+                        }
+                    }
                     ZoomableCardArtwork(
-                        cardId = card.id,
+                        cardId = "${card.id}-$showBack",
                         request = request,
                         onPrevious = onPrevious,
                         onNext = onNext,

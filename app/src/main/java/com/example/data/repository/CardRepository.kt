@@ -40,9 +40,10 @@ class CardRepository(
         maxCmc: Int?,
         colors: Set<String>,
         limit: Int,
-        multiColorOnly: Boolean = false
+        multiColorOnly: Boolean = false,
+        commanderOnly: Boolean = false
     ): Flow<List<CardEntity>> = cardDao.searchCards(
-        query.trim(), type, rarity, bookmarkedOnly, maxCmc, colors.joinToString(""), limit, multiColorOnly
+        query.trim(), type, rarity, bookmarkedOnly, maxCmc, colors.joinToString(""), limit, multiColorOnly, commanderOnly
     )
 
     fun observeCard(cardId: String): Flow<CardEntity?> = cardDao.observeCardById(cardId)

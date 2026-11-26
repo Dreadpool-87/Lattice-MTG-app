@@ -42,6 +42,8 @@ interface CardDao {
         AND (:rarity = 'All' OR rarity = :rarity COLLATE NOCASE)
         AND (:bookmarkedOnly = 0 OR isBookmarked = 1)
         AND (:maxCmc IS NULL OR cmc <= :maxCmc)
+        AND (:commanderOnly = 0 OR (isCustom = 0 AND scryfallId != ''
+            AND instr(',' || lower(replace(legalFormats, ' ', '')) || ',', ',commander,') > 0))
         AND (:multiColorOnly = 0 OR (
             (instr(',' || replace(cards.colors, ' ', '') || ',', ',W,') > 0) +
             (instr(',' || replace(cards.colors, ' ', '') || ',', ',U,') > 0) +
@@ -71,7 +73,8 @@ interface CardDao {
         maxCmc: Int?,
         colors: String,
         limit: Int,
-        multiColorOnly: Boolean = false
+        multiColorOnly: Boolean = false,
+        commanderOnly: Boolean = false
     ): Flow<List<CardEntity>>
 
     @Query("SELECT COUNT(*) FROM cards")

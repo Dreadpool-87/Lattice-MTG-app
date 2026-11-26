@@ -221,7 +221,8 @@ class Step3DataAndValidationTest {
                     typeLine = "Creature — Human Insect",
                     oracleText = "Flying",
                     power = "3",
-                    toughness = "2"
+                    toughness = "2",
+                    imageUri = "https://cards.scryfall.io/normal/back/1/a/example.jpg"
                 )
             )
         )
@@ -279,8 +280,8 @@ class Step3DataAndValidationTest {
         }
 
         composeRule.onNodeWithTag("card_faces_section").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Face 1: Delver of Secrets").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Face 2: Insectile Aberration").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Front · Delver of Secrets").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Back · Insectile Aberration").performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithTag("card_legality_status").performScrollTo()
             .assertTextContains("Unknown", substring = true)
