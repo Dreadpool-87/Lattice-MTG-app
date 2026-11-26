@@ -66,7 +66,7 @@ important decklists and original collection CSVs.
 
 Lattice MTG is an unofficial Magic: The Gathering fan project. Wizards of the Coast has not approved, endorsed, or sponsored it. Portions of the materials used belong to Wizards of the Coast. © Wizards of the Coast LLC. See the [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy).
 
-This Android repository currently has no project-wide code license. Third-party components retain their respective licenses.
+The original Android application code is licensed under the [MIT License](LICENSE). Third-party code, card data, artwork, and trademarks remain subject to their respective terms.
 
 ### Offline card data
 
