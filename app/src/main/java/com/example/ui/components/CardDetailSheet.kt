@@ -137,10 +137,13 @@ fun CardInspectorSheet(
     val decodedFaces = remember(card.cardFacesJson) {
         CardJsonCodec.decodeFaces(card.cardFacesJson)
     }
+    val context = LocalContext.current
     val imageRevision = offlineArtwork?.localImageRevision?.collectAsStateWithLifecycle()?.value
-    val hasBackSide = remember(offlineArtwork, card, imageRevision) {
-        offlineArtwork?.hasBackSide(card)
-            ?: card.offlineArtworkImages().any { it.side == ArtworkSide.BACK && !it.inferredBack }
+    val hasBackSide = remember(context, offlineArtwork, card, imageRevision) {
+        offlineArtwork?.hasBackSide(card) ?: (
+            OfflineArtworkRepository.localFile(context, card.scryfallId, ArtworkSide.BACK) != null ||
+                card.offlineArtworkImages().any { it.side == ArtworkSide.BACK && !it.inferredBack }
+            )
     }
     val effectiveRulings = remember(rulings, card.rulingsJson) {
         if (rulings.isNotEmpty()) rulings else CardJsonCodec.decodeRulings(card.rulingsJson)
