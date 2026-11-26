@@ -2,6 +2,8 @@ package com.example.ui.components
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.background
@@ -71,6 +73,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -101,6 +104,7 @@ import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private enum class CardInspectorPage { DETAILS, RULINGS, ADD_TO_DECK }
@@ -272,7 +276,7 @@ fun CardInspectorSheet(
             }
             Spacer(modifier = Modifier.height(8.dp))
             if (showCardArt || offlineArtwork != null) {
-                CardArtworkActions(card, showCardArt, isOnline, offlineArtwork)
+                CardArtworkActions(card, showCardArt, isOnline, offlineArtwork, onPrevious, onNext)
             }
 
             Surface(
@@ -717,7 +721,9 @@ private fun CardArtworkActions(
     card: CardEntity,
     showCardArt: Boolean,
     isOnline: Boolean,
-    repository: OfflineArtworkRepository?
+    repository: OfflineArtworkRepository?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?
 ) {
     val scope = rememberCoroutineScope()
     var showDownload by remember(card.id) { mutableStateOf(false) }
@@ -778,11 +784,17 @@ private fun CardArtworkActions(
             )
         }
     }
-    if (showCardArt) CardInspectorArtwork(card, isOnline, artworkRevision)
+    if (showCardArt) CardInspectorArtwork(card, isOnline, artworkRevision, onPrevious, onNext)
 }
 
 @Composable
-private fun CardInspectorArtwork(card: CardEntity, isOnline: Boolean, artworkRevision: Int) {
+private fun CardInspectorArtwork(
+    card: CardEntity,
+    isOnline: Boolean,
+    artworkRevision: Int,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?
+) {
     val context = LocalContext.current
     val sources = remember(context, card, isOnline, artworkRevision) {
         card.offlineArtworkImages().associate { image ->
@@ -793,34 +805,37 @@ private fun CardInspectorArtwork(card: CardEntity, isOnline: Boolean, artworkRev
     val front = sources[ArtworkSide.FRONT]
     val back = sources[ArtworkSide.BACK]
     var showBack by remember(card.id) { mutableStateOf(false) }
-    var enlarged by remember(card.id) { mutableStateOf(false) }
-    val source = (if (showBack) back else front) ?: front ?: back ?: return
+    var enlarged by remember { mutableStateOf(false) }
+    val source = (if (showBack) back else front) ?: front ?: back
     val description = if (back == null) card.name else "${card.name} · ${if (showBack || front == null) "back" else "front"}"
     val request = remember(context, source, isOnline) {
+        if (source == null) return@remember null
         ImageRequest.Builder(context)
             .data(source)
             .networkCachePolicy(if (isOnline) CachePolicy.ENABLED else CachePolicy.DISABLED)
             .build()
     }
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        AsyncImage(
-            model = request,
-            contentDescription = description,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth()
-                .aspectRatio(488f / 680f).testTag("sheet_card_art")
-                .clip(RoundedCornerShape(14.dp))
-                .clickable(onClickLabel = "Enlarge card image") { enlarged = true }
-        )
-    }
-    if (front != null && back != null) {
+    if (request != null) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            TextButton(onClick = { showBack = !showBack }) {
-                Text(if (showBack) "Show front" else "Show back")
+            AsyncImage(
+                model = request,
+                contentDescription = description,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth()
+                    .aspectRatio(488f / 680f).testTag("sheet_card_art")
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClickLabel = "Enlarge card image") { enlarged = true }
+            )
+        }
+        if (front != null && back != null) {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                TextButton(onClick = { showBack = !showBack }) {
+                    Text(if (showBack) "Show front" else "Show back")
+                }
             }
         }
+        Spacer(modifier = Modifier.height(12.dp))
     }
-    Spacer(modifier = Modifier.height(12.dp))
 
     if (enlarged) {
         Dialog(
@@ -836,7 +851,10 @@ private fun CardInspectorArtwork(card: CardEntity, isOnline: Boolean, artworkRev
                         Icon(Icons.Filled.Close, contentDescription = "Close enlarged image")
                     }
                     ZoomableCardArtwork(
+                        cardId = card.id,
                         request = request,
+                        onPrevious = onPrevious,
+                        onNext = onNext,
                         description = description,
                         modifier = Modifier.weight(1f).fillMaxWidth()
                     )
@@ -848,9 +866,19 @@ private fun CardInspectorArtwork(card: CardEntity, isOnline: Boolean, artworkRev
 
 
 @Composable
-private fun ZoomableCardArtwork(request: ImageRequest, description: String, modifier: Modifier) {
-    var zoom by remember(request) { mutableStateOf(1f) }
-    var offset by remember(request) { mutableStateOf(Offset.Zero) }
+private fun ZoomableCardArtwork(
+    cardId: String,
+    request: ImageRequest?,
+    description: String,
+    modifier: Modifier,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?
+) {
+    var zoom by remember(cardId, request) { mutableStateOf(1f) }
+    var offset by remember(cardId, request) { mutableStateOf(Offset.Zero) }
+    val previousAction by rememberUpdatedState(onPrevious)
+    val nextAction by rememberUpdatedState(onNext)
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val cardAspect = 488f / 680f
         val fittedWidth = minOf(maxWidth, maxHeight * cardAspect)
@@ -863,7 +891,28 @@ private fun ZoomableCardArtwork(request: ImageRequest, description: String, modi
                 .clipToBounds()
                 .testTag("sheet_enlarged_art")
                 .semantics { stateDescription = "${(zoom * 100).roundToInt()}% zoom" }
-                .pointerInput(request, widthPx, heightPx) {
+                .pointerInput(cardId, request, isRtl) {
+                    awaitEachGesture {
+                        val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        if (zoom > 1f) return@awaitEachGesture
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.changes.any { it.id != first.id && it.pressed }) break
+                            val change = event.changes.firstOrNull { it.id == first.id } ?: break
+                            if (!change.pressed) {
+                                val movement = change.position - first.position
+                                val horizontal = if (isRtl) -movement.x else movement.x
+                                if (zoom <= 1f && abs(horizontal) >= 56.dp.toPx() &&
+                                    abs(horizontal) > abs(movement.y) * 1.25f
+                                ) {
+                                    if (horizontal < 0f) nextAction?.invoke() else previousAction?.invoke()
+                                }
+                                break
+                            }
+                        } while (true)
+                    }
+                }
+                .pointerInput(cardId, request, widthPx, heightPx) {
                     detectTransformGestures { centroid, pan, zoomChange, _ ->
                         val nextZoom = (zoom * zoomChange).coerceIn(1f, 4f)
                         val viewportCenter = Offset(size.width / 2f, size.height / 2f)
@@ -876,18 +925,22 @@ private fun ZoomableCardArtwork(request: ImageRequest, description: String, modi
                     }
                 }
         ) {
-            AsyncImage(
-                model = request,
-                contentDescription = description,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.size(fittedWidth, fittedHeight)
-                    .graphicsLayer {
-                        scaleX = zoom
-                        scaleY = zoom
-                        translationX = offset.x
-                        translationY = offset.y
-                    }
-            )
+            if (request == null) {
+                Text("$description · No image available", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                AsyncImage(
+                    model = request,
+                    contentDescription = description,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(fittedWidth, fittedHeight)
+                        .graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                            translationX = offset.x
+                            translationY = offset.y
+                        }
+                )
+            }
         }
     }
 }

@@ -69,6 +69,7 @@ import com.example.ui.components.ManaSymbolPip
 import com.example.ui.viewmodel.VaultViewModel
 import com.example.ui.viewmodel.DecksViewModel
 import com.example.PreviewLog
+import com.example.domain.VaultListCard
 
 internal val cardTypeFilters = listOf("All", "Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land")
 private val colorFilters = listOf("W", "U", "B", "R", "G", "C")
@@ -91,6 +92,7 @@ fun VaultScreen(
     var selectedTab by rememberSaveable { mutableStateOf("Collections") }
     val showCollections = selectedTab == "Collections"
     val showCatalog = selectedTab == "Catalog"
+    val showDecks = selectedTab == "Decks" && decksViewModel != null
     DisposableEffect(viewModel, showCatalog) {
         viewModel.setCatalogOpen(showCatalog)
         onDispose { viewModel.setCatalogOpen(false) }
@@ -100,6 +102,8 @@ fun VaultScreen(
     var inspectedCard by remember { mutableStateOf<Pair<List<CardEntity>, CardEntity>?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
+    var showDeckCsvImport by remember { mutableStateOf(false) }
+    var showCreateDeck by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.statusBanner) {
         val msg = uiState.statusBanner
@@ -144,6 +148,13 @@ fun VaultScreen(
                             onClick = { showCsvImportDialog = true },
                             modifier = Modifier.testTag("open_csv_import_button")
                         ) { Text("Import CSV") }
+                    }
+                } else if (showDecks && decksViewModel != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { showCreateDeck = true }) { Text("New deck") }
+                        OutlinedButton(onClick = { decksViewModel.clearCsvImport(); showDeckCsvImport = true }) {
+                            Text("Import CSV")
+                        }
                     }
                 } else if (showCatalog) {
                     Row(
@@ -297,9 +308,25 @@ fun VaultScreen(
             }
 
             if (showCollections) {
-                VaultCollections(collections, offlineArtwork = offlineArtwork, onOpenCard = { cards, card -> inspectedCard = cards to card })
-            } else if (selectedTab == "Decks" && decksViewModel != null) {
-                DecksScreen(decksViewModel, snackbarHostState, onOpenDeck, onOpenSettings, showHeader = false)
+                val lists = remember(collections) {
+                    collections.map { (name, cards) ->
+                        VaultCardList(name, name, cards.map { VaultListCard(it.card, it.entry.quantity.toLong()) })
+                    }
+                }
+                VaultCardLists(lists, "Import a CSV to add a collection.",
+                    onOpenCard = { cards, card -> inspectedCard = cards to card }, offlineArtwork = offlineArtwork)
+            } else if (showDecks) {
+                val lists = remember(uiState.decks) {
+                    uiState.decks.map { deck ->
+                        val cards = deck.entries.groupBy { it.card.id }.values.map { copies ->
+                            VaultListCard(copies.first().card, copies.sumOf { it.entry.quantity.toLong() })
+                        }
+                        VaultCardList(deck.deck.id.toString(), deck.deck.name, cards, deck.deck.format, deck.deck.id)
+                    }
+                }
+                VaultCardLists(lists, "Create a deck or import a deck CSV.",
+                    onOpenCard = { cards, card -> inspectedCard = cards to card },
+                    offlineArtwork = offlineArtwork, onEditDeck = onOpenDeck)
             } else if (uiState.cards.isEmpty()) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -378,6 +405,32 @@ fun VaultScreen(
                 viewModel.createCustomCard(name, mana, cmc, type, oracle, colors, rarity, p, t, tags)
             }
         )
+    }
+
+    if (showDecks && decksViewModel != null) {
+        if (showCreateDeck) {
+            CreateDeckDialog(
+                onDismiss = { showCreateDeck = false },
+                onCreate = { name, format, description, colors ->
+                    showCreateDeck = false
+                    decksViewModel.createDeck(name, format, description, colors, onOpenDeck)
+                }
+            )
+        }
+        if (showDeckCsvImport) {
+            val imported by decksViewModel.csvImport.collectAsStateWithLifecycle()
+            CsvImportDialog(
+                isImporting = imported.isImporting,
+                report = imported.report,
+                forDeck = true,
+                importError = imported.error,
+                onImportCsv = { csv, name, format, _ ->
+                    decksViewModel.importDeckCsv(name, format, csv) { showDeckCsvImport = false }
+                },
+                onClearReport = decksViewModel::clearCsvImport,
+                onDismiss = { showDeckCsvImport = false }
+            )
+        }
     }
 
     if (showCollections && showCsvImportDialog) {

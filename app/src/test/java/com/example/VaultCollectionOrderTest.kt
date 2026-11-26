@@ -2,8 +2,7 @@ package com.example
 
 import com.example.data.local.CardMetadataStatus
 import com.example.data.local.StarterCards
-import com.example.data.local.VaultCollectionCard
-import com.example.data.local.VaultCollectionEntry
+import com.example.domain.VaultListCard
 import com.example.domain.VaultCollectionGrouping
 import com.example.domain.VaultCollectionOrder
 import com.example.domain.VaultCollectionSort
@@ -19,12 +18,12 @@ class VaultCollectionOrderTest {
         status: String = CardMetadataStatus.VERIFIED,
         cmc: Double = 0.0,
         id: String = name
-    ): VaultCollectionCard {
+    ): VaultListCard {
         val card = StarterCards.cards.first().copy(
             id = id, name = name, colors = colors, colorIdentity = "U", typeLine = type,
             metadataStatus = status, cmc = cmc
         )
-        return VaultCollectionCard(VaultCollectionEntry("Test collection", id, quantity), card)
+        return VaultListCard(card, quantity.toLong())
     }
 
     @Test

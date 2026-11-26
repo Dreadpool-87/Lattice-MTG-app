@@ -724,6 +724,12 @@ class Step2ImportAndMigrationTest {
             runBlocking { deckRepo.createDeck("Offline test deck", "Modern", "", emptyList()) }
             val prefs = PreferencesRepository(context)
             val viewModel = VaultViewModel(cardRepo, deckRepo, onlineMonitor, prefs, db.vaultCollectionDao())
+            val deckModel = DecksViewModel(deckRepo, cardRepo, onlineMonitor, prefs)
+            val solRing = StarterCards.cards.first { it.name == "Sol Ring" }
+            runBlocking {
+                val deckId = deckRepo.allDecks.first().single().deck.id
+                db.deckDao().insertEntries(listOf(DeckEntryEntity(deckId = deckId, cardId = solRing.id, quantity = 1)))
+            }
 
             composeRule.setContent {
                 LatticeMtgTheme {
@@ -731,12 +737,12 @@ class Step2ImportAndMigrationTest {
                     VaultScreen(
                         viewModel = viewModel,
                         snackbarHostState = snackbarHostState,
-                        onOpenSettings = {}
+                        onOpenSettings = {},
+                        decksViewModel = deckModel
                     )
                 }
             }
 
-            val solRing = StarterCards.cards.first { it.name == "Sol Ring" }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 viewModel.uiState.value.decks.isNotEmpty()
             }
@@ -744,6 +750,17 @@ class Step2ImportAndMigrationTest {
             assertTrue(viewModel.uiState.value.cards.isEmpty())
             composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
             composeRule.onNodeWithTag("open_csv_import_button").assertIsDisplayed()
+            composeRule.onNodeWithText("Decks").performClick()
+            composeRule.onNodeWithTag("decks_list").assertDoesNotExist()
+            composeRule.onNodeWithText("Offline test deck").performClick()
+            composeRule.onNodeWithText("Find a card or set").assertIsDisplayed()
+            composeRule.onNodeWithTag("collection_group_menu").performClick()
+            composeRule.onNodeWithText("Color").performClick()
+            composeRule.onNodeWithText("Sol Ring").assertDoesNotExist()
+            composeRule.onNodeWithText("Colorless").performClick()
+            composeRule.onNodeWithText("Sol Ring").assertIsDisplayed()
+            composeRule.onNodeWithText("Colorless").performClick()
+            composeRule.onNodeWithText("Sol Ring").assertDoesNotExist()
             composeRule.onNodeWithText("Catalog").performClick()
             composeRule.onNodeWithTag("open_csv_import_button").assertDoesNotExist()
             composeRule.onNodeWithTag("type_filter_artifact").assertDoesNotExist()

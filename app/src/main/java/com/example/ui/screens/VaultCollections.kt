@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,38 +42,52 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.repository.OfflineArtworkRepository
 import com.example.data.local.CardEntity
-import com.example.data.local.VaultCollectionCard
+import com.example.domain.VaultListCard
 import com.example.domain.VaultCollectionGrouping
 import com.example.domain.VaultCollectionOrder
 import com.example.domain.VaultCollectionSort
 
+internal data class VaultCardList(
+    val id: String,
+    val title: String,
+    val entries: List<VaultListCard>,
+    val subtitle: String? = null,
+    val editDeckId: Long? = null
+)
+
 @Composable
-internal fun VaultCollections(
-    collections: Map<String, List<VaultCollectionCard>>,
+internal fun VaultCardLists(
+    lists: List<VaultCardList>,
+    emptyText: String,
     onOpenCard: (List<CardEntity>, CardEntity) -> Unit,
-    offlineArtwork: OfflineArtworkRepository? = null
+    offlineArtwork: OfflineArtworkRepository? = null,
+    onEditDeck: (Long) -> Unit = {}
 ) {
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     var sort by rememberSaveable { mutableStateOf(VaultCollectionSort.NAME_ASC) }
     var grouping by rememberSaveable { mutableStateOf(VaultCollectionGrouping.NONE) }
+    var expandedGroups by rememberSaveable(expanded, grouping) { mutableStateOf(arrayListOf<String>()) }
     var filters by remember { mutableStateOf(PersonalCardFilters()) }
-    val selectedEntries = remember(collections, expanded, filters) {
-        collections[expanded].orEmpty().filter { filters.matches(it.card) }
+    val selectedEntries = remember(lists, expanded, filters) {
+        lists.firstOrNull { it.id == expanded }?.entries.orEmpty().filter { filters.matches(it.card) }
     }
     val groups = remember(selectedEntries, sort, grouping) {
         VaultCollectionOrder.arrange(selectedEntries, sort, grouping)
     }
-    val inspectorCards = remember(groups) { groups.flatMap { group -> group.entries.map { it.card } } }
+    val inspectorCards = remember(groups, expandedGroups) {
+        groups.filter { it.heading == null || it.heading in expandedGroups }
+            .flatMap { group -> group.entries.map { it.card } }
+    }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("vault_personal_card_lists"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (collections.isEmpty()) {
-            item { Text("Import a CSV as a collection to see your cards and copy counts here.") }
-        }
+        if (lists.isEmpty()) item { Text(emptyText) }
 
-        collections.forEach { (name, entries) ->
+        lists.forEach { list ->
+            val name = list.id
+            val entries = list.entries
             val isExpanded = expanded == name
             item(key = "collection:$name") {
                 Surface(
@@ -80,7 +95,7 @@ internal fun VaultCollections(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().clickable(
                         role = Role.Button,
-                        onClickLabel = if (isExpanded) "Collapse collection" else "Expand collection"
+                        onClickLabel = if (isExpanded) "Collapse card list" else "Expand card list"
                     ) { expanded = name.takeUnless { isExpanded } }
                 ) {
                     Row(
@@ -88,11 +103,12 @@ internal fun VaultCollections(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(name, style = MaterialTheme.typography.titleMedium)
-                            val copies = entries.sumOf { it.entry.quantity.toLong() }
+                            Text(list.title, style = MaterialTheme.typography.titleMedium)
+                            val copies = entries.sumOf { it.quantity }
                             val copyLabel = if (copies == 1L) "copy" else "copies"
                             val printingLabel = if (entries.size == 1) "printing" else "printings"
-                            Text("$copies $copyLabel · ${entries.size} $printingLabel", style = MaterialTheme.typography.bodySmall)
+                            val details = listOfNotNull(list.subtitle, "$copies $copyLabel", "${entries.size} $printingLabel")
+                            Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
                         }
                         Icon(if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
                     }
@@ -100,7 +116,12 @@ internal fun VaultCollections(
             }
             if (isExpanded) {
                 item(key = "collection-filters:$name") {
-                    PersonalCardFilterControls(filters, onChange = { filters = it })
+                    Column {
+                        list.editDeckId?.let { deckId ->
+                            TextButton(onClick = { onEditDeck(deckId) }) { Text("Edit deck") }
+                        }
+                        PersonalCardFilterControls(filters, onChange = { filters = it })
+                    }
                 }
                 item(key = "collection-order:$name") {
                     Row(
@@ -117,19 +138,30 @@ internal fun VaultCollections(
                         )
                     }
                 }
-                if (groups.isEmpty()) {
-                    item(key = "collection-empty:$name") { Text("No cards match these filters.") }
+                if (selectedEntries.isEmpty()) {
+                    item(key = "collection-empty:$name") {
+                        Text(if (entries.isEmpty()) "This list is empty." else "No cards match these filters.")
+                    }
                 }
                 groups.forEach { group ->
+                    val groupExpanded = group.heading == null || group.heading in expandedGroups
                     group.heading?.let { heading ->
                         item(key = "collection-group:$name:$heading") {
-                            val copies = group.entries.sumOf { it.entry.quantity.toLong() }
+                            val copies = group.entries.sumOf { it.quantity }
                             Surface(
                                 color = MaterialTheme.colorScheme.primaryContainer,
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp)
                                     .semantics { heading() }
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClickLabel = if (groupExpanded) "Collapse group" else "Expand group"
+                                    ) {
+                                        expandedGroups = ArrayList(
+                                            if (groupExpanded) expandedGroups - heading else expandedGroups + heading
+                                        )
+                                    }
                             ) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -144,11 +176,15 @@ internal fun VaultCollections(
                                         if (copies == 1L) "1 copy" else "$copies copies",
                                         style = MaterialTheme.typography.labelMedium
                                     )
+                                    Icon(
+                                        if (groupExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                        contentDescription = null
+                                    )
                                 }
                             }
                         }
                     }
-                    items(group.entries, key = { "entry:$name:${it.card.id}" }) { entry ->
+                    if (groupExpanded) items(group.entries, key = { "entry:$name:${it.card.id}" }) { entry ->
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable { onOpenCard(inspectorCards, entry.card) }.padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -163,7 +199,7 @@ internal fun VaultCollections(
                                 if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
                                 OfflineImageBadge(entry.card, offlineArtwork)
                             }
-                            Text("×${entry.entry.quantity}", style = MaterialTheme.typography.titleSmall)
+                            Text("×${entry.quantity}", style = MaterialTheme.typography.titleSmall)
                         }
                     }
                 }

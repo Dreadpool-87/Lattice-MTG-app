@@ -86,8 +86,7 @@ fun DecksScreen(
     snackbarHostState: SnackbarHostState,
     onOpenDeck: (Long) -> Unit,
     onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-    showHeader: Boolean = true
+    modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val csvImport by viewModel.csvImport.collectAsStateWithLifecycle()
@@ -125,7 +124,7 @@ fun DecksScreen(
                 .fillMaxSize()
                 .testTag("decks_list")
         ) {
-            if (showHeader) item {
+            item {
                 MainTabHeader(
                     title = stringResource(R.string.nav_decks),
                     onOpenSettings = onOpenSettings,
@@ -478,7 +477,7 @@ private fun DeckListCard(
 }
 
 @Composable
-private fun CreateDeckDialog(
+internal fun CreateDeckDialog(
     onDismiss: () -> Unit,
     onCreate: (String, String, String, List<String>) -> Unit
 ) {

@@ -43,6 +43,7 @@ import com.example.domain.CardRulingInfo
 import com.example.domain.DeckAnalytics
 import com.example.ui.components.CardInspectorSheet
 import com.example.ui.theme.LatticeMtgTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -354,8 +355,20 @@ class Step3DataAndValidationTest {
         }
         val zoom = enlarged.fetchSemanticsNode().config[SemanticsProperties.StateDescription]
         assertTrue(zoom.substringBefore('%').toInt() > 100)
+        enlarged.performTouchInput { swipeLeft() }
+        assertEquals(twoSided, selected.value)
         composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
         composeRule.onNodeWithText("Show front").assertIsDisplayed()
+
+        composeRule.onNodeWithContentDescription("${twoSided.name} · back").performScrollTo().performClick()
+        enlarged.performTouchInput { swipeLeft() }
+        composeRule.onNodeWithText("${neighbor.name} · No image available").assertIsDisplayed()
+        enlarged.performTouchInput { swipeRight() }
+        enlarged.assertIsDisplayed()
+        assertEquals(twoSided, selected.value)
+        assertEquals("100% zoom", enlarged.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
+        composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
+        composeRule.onNodeWithText("Show back").assertIsDisplayed()
     }
     @Test
     @Config(sdk = [36], qualifiers = "w360dp-h640dp")
