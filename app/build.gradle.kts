@@ -46,7 +46,7 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      applicationIdSuffix = ".preview"
+      applicationIdSuffix = providers.gradleProperty("previewApplicationIdSuffix").getOrElse(".preview")
       versionNameSuffix = "-preview"
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
