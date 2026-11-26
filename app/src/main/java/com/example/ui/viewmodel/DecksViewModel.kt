@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.DeckWithEntries
+import com.example.data.repository.DeckCardLookupException
 import com.example.data.repository.CardRepository
 import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
@@ -147,6 +148,8 @@ class DecksViewModel(
                 onImported(result.deckId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (error: DeckCardLookupException) {
+                statusMessage.value = error.message
             } catch (_: Exception) {
                 statusMessage.value = "Could not import the deck. Check the decklist and try again."
             } finally {

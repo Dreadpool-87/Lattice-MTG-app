@@ -8,42 +8,56 @@ Lattice MTG is a native Android companion for Magic: The Gathering. Browse a loc
 
 ## Features
 
-- **Card Vault.** Search and filter a bundled starter catalog and locally cached cards. Bookmark cards, create custom entries, and fetch additional cards from Scryfall. Inspect card faces, locally cached printings, and rulings when available.
+- **Card Vault.** Open saved collections in **Vault** and search the bundled offline catalog under **Browse catalog**. Bookmark cards, create custom entries, and fetch additional cards from Scryfall. Inspect card faces, locally cached printings, and rulings when available.
 - **Delver Lens import.** Open **Vault → Import CSV** and choose **My collection** or **Deck**. Collections are named, expandable lists of owned copies by verified printing. The import review shows conflicts and unresolved rows.
 - **Decks.** Create and edit decks, paste a text decklist, copy a decklist to the clipboard, and view mana curve and synergy summaries.
 - **Tabletop.** Track life totals, poison counters, and commander damage. Use the probability calculator to explore draws.
-- **Lattice Oracle.** Ask Gemini questions through Firebase AI Logic. If you select a deck, the app sends relevant deck information with your question, including up to 35 mainboard entries. Deck statistics and AI replies are aids for reviewing a deck.
 
 ## Current limitations
 
-- The Vault searches the starter catalog and cards stored on your device. Online Scryfall lookups can expand that cache. In offline-only mode, CSV rows that require an online lookup remain unresolved.
-- Collection imports record verified quantities per printing. Replacing an existing collection requires confirmation and a fully verified import. Collections imported before this feature can be reconstructed by re-importing the original CSV. Use the [web collection importer](https://dreadpool-87.github.io/Lattice-MTG/collection/) for collection-level exports.
-- Deck checks cover selected rules. Review format-specific requirements separately, especially when some cards are unresolved or the Oracle chat received only part of the decklist.
+- The catalog includes one representative printing per card plus locally cached printings. Online Scryfall lookups can expand that cache. In offline-only mode, CSV rows that require an online lookup remain unresolved.
+- Collection imports require a Scryfall printing ID or a set code and collector number to verify the owned printing. Replacing an existing collection requires confirmation and a fully verified import. Collections imported before this feature can be reconstructed by re-importing the original CSV. Use the [web collection importer](https://dreadpool-87.github.io/Lattice-MTG/collection/) for collection-level exports.
+- Deck checks cover selected rules. Review format-specific requirements separately, especially when some cards are unresolved.
 
 ## Build and test
 
-The app targets Android API 36 and supports devices on API 24 or newer. For a local build, use Android Studio with Android SDK 36.1, JDK 17 or newer compatible with the project, and Gradle 9.3.1. See the [Android Gradle Plugin compatibility table](https://developer.android.com/build/releases/agp-9-1-0-release-notes#compatibility).
+The app targets Android API 36 and supports devices on API 24 or newer. For a local build, use Android Studio with Android SDK 36.1, JDK 21, and the included Gradle 9.3.1 wrapper. See the [Android Gradle Plugin compatibility table](https://developer.android.com/build/releases/agp-9-1-0-release-notes#compatibility).
 
-The GitHub checkout contains the wrapper version settings. Use an installed Gradle 9.3.1 because the wrapper launchers and JAR are absent. The debug signing configuration expects a local `debug.keystore` at the repository root. For a fresh development install, you can generate it locally:
+The debug signing configuration expects a local `debug.keystore` at the repository root. For a fresh development install, you can generate it locally:
 
 ```sh
 keytool -genkeypair -keystore debug.keystore -storepass android \
   -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
   -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-gradle :app:assembleDebug :app:testDebugUnitTest
+./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-Keep the signing key used for any installed build you plan to update in place. For instrumentation tests, attach a device or start an emulator, then run `gradle :app:connectedDebugAndroidTest`.
+Keep the signing key used for any installed build you plan to update in place. For instrumentation tests, attach a device or start an emulator, then run `./gradlew :app:connectedDebugAndroidTest`.
 
-The repository includes tests for card refresh, upgrading the local database, Delver Lens import, deck checks, and the scope of data sent to Gemini. When reporting a bug, include the app version or commit, your Android version, and steps to reproduce it.
-
-The app uses [Firebase AI Logic](https://firebase.google.com/docs/ai-logic) and [App Check](https://firebase.google.com/docs/ai-logic/app-check) for Oracle chat. To test chat outside AI Studio, configure Firebase and App Check for your build. Keep local environment files, signing keys, and App Check debug tokens out of commits and issue reports.
+The repository includes tests for card refresh, local database migrations, Delver Lens import, and deck checks. When reporting a bug, include the app version or commit, your Android version, and steps to reproduce it.
 
 ## In-app updates
+
+**Users on Android app versions 1.0 and 1.2:** those builds used an older signing
+certificate. Android cannot install 1.3 or later over them. Before uninstalling,
+copy important decklists and keep your original collection CSV. Uninstalling
+clears local app data, and recovery from Android Backup across the key change
+has not been verified. Keep the old install if you still need data from it.
+
+Versions 1.3 and 1.4 share the current release signing certificate. Its SHA-256
+fingerprint is `fb7a676614355ff004ab47de8026d529722874b55131174ad6f1a05fd2da1e73`.
+Android verifies the signer during installation. Play Protect evaluates the
+download independently.
 
 In **Settings → App updates**, check for a new version and select **Update** when one is offered. Android asks for confirmation and may ask you to allow installs from Lattice MTG the first time.
 
 For each stable GitHub release, attach the signed APK as `lattice-android.apk` and an `android-update.json` file containing `tag` (the exact GitHub release tag), `versionCode` (the integer in the APK), and `sha256` (the lowercase SHA-256 digest of the signed APK). Attach both assets before publishing. Raise the APK version code for each release and use the same application ID and signing key as the installed APK. Android verifies the signature when installing over the existing app.
+
+## Android backup
+
+Android backup is enabled and may include local decks, saved collections and
+preferences according to the device's backup settings. Keep separate copies of
+important decklists and original collection CSVs.
 
 ## Credits and licensing
 

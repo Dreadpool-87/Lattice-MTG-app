@@ -192,7 +192,8 @@ object DelverCsvImporter {
         rows: List<DelverCsvRow>,
         cardDao: CardDao,
         scryfallApi: ScryfallApi?,
-        canFetchOnline: Boolean
+        canFetchOnline: Boolean,
+        requireExactPrinting: Boolean = false
     ): DelverImportReport {
         val checkedRows = mutableListOf<DelverRowResolution>()
         val candidates = mutableMapOf<DelverCsvRow, CardEntity>()
@@ -204,6 +205,19 @@ object DelverCsvImporter {
                         row = row,
                         status = CsvRowMatchStatus.UNRESOLVED,
                         statusDetail = "Row ${row.rowNumber}: Invalid quantity (${row.quantity})."
+                    )
+                )
+                continue
+            }
+
+            if (requireExactPrinting && row.scryfallId == null &&
+                (row.setCode == null || row.collectorNumber == null)
+            ) {
+                checkedRows.add(
+                    DelverRowResolution(
+                        row = row,
+                        status = CsvRowMatchStatus.UNRESOLVED,
+                        statusDetail = "A collection row needs a Scryfall printing ID or a set code and collector number."
                     )
                 )
                 continue
@@ -342,10 +356,11 @@ object DelverCsvImporter {
 
         // Search the supplied set before considering a name match verified.
         row.name?.let { cardName ->
-            val local = cardDao.findAllByExactNameIgnoreCase(cardName).firstOrNull {
+            val local = cardDao.findAllByExactNameIgnoreCase(cardName).filter {
                 it.metadataStatus == CardMetadataStatus.VERIFIED && verifySuppliedFields(row, it).isEmpty()
             }
-            if (local != null) return local
+            if (local.distinctBy { it.oracleId.ifBlank { it.id } }.size > 1) return null
+            if (local.isNotEmpty()) return local.first()
 
             if (canFetchOnline && scryfallApi != null) {
                 return fetchRemoteSafe(pauseMillis = 550) {

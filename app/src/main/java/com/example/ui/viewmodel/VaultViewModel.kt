@@ -19,12 +19,15 @@ import com.example.domain.DelverImportReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -41,6 +44,7 @@ data class CardInspectionExtras(
 
 data class VaultUiState(
     val cards: List<CardEntity> = emptyList(),
+    val hasMoreCards: Boolean = false,
     val totalVaultCount: Int = 0,
     val query: String = "",
     val selectedColors: Set<String> = emptySet(),
@@ -58,7 +62,19 @@ data class VaultUiState(
     val statusBanner: String? = null
 )
 
-@OptIn(ExperimentalCoroutinesApi::class)
+private const val CATALOG_PAGE_SIZE = 100
+
+private data class CatalogFilters(
+    val query: String,
+    val colors: Set<String>,
+    val type: String,
+    val rarity: String,
+    val maxCmc: Int?
+)
+
+private data class CatalogResults(val cards: List<CardEntity>, val hasMore: Boolean)
+
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class VaultViewModel(
     private val cardRepository: CardRepository,
     private val deckRepository: DeckRepository,
@@ -88,9 +104,34 @@ class VaultViewModel(
     val inspectionExtras: StateFlow<CardInspectionExtras> = _inspectionExtras
     private var inspectionJob: Job? = null
 
-    private val searchedCardsFlow = query.flatMapLatest { q ->
-        cardRepository.searchLocalCards(q)
+    private val catalogOpen = MutableStateFlow(false)
+    private val catalogLimit = MutableStateFlow(CATALOG_PAGE_SIZE)
+    private val catalogFilters = combine(
+        query.debounce(180), selectedColors, selectedType, selectedRarity, maxCmcFilter,
+        ::CatalogFilters
+    )
+
+    private val searchedCardsFlow = catalogOpen.flatMapLatest { open ->
+        if (!open) return@flatMapLatest flowOf(CatalogResults(emptyList(), false))
+        combine(catalogFilters, bookmarkedOnly, catalogLimit, ::Triple)
+            .flatMapLatest { (filters, bookmarked, limit) ->
+                cardRepository.searchLocalCards(
+                    filters.query, filters.type, filters.rarity, bookmarked, filters.maxCmc,
+                    filters.colors, limit + 1
+                ).map { CatalogResults(it.take(limit), it.size > limit) }
+            }
     }
+
+    fun setCatalogOpen(open: Boolean) {
+        catalogOpen.value = open
+        if (!open) catalogLimit.value = CATALOG_PAGE_SIZE
+    }
+
+    fun loadMoreCatalogCards() {
+        if (uiState.value.hasMoreCards) catalogLimit.value += CATALOG_PAGE_SIZE
+    }
+
+    fun observeCard(cardId: String) = cardRepository.observeCard(cardId)
 
     val uiState: StateFlow<VaultUiState> = combine(
         searchedCardsFlow,
@@ -111,7 +152,7 @@ class VaultViewModel(
         statusBanner
     ) { values ->
         @Suppress("UNCHECKED_CAST")
-        val rawCards = values[0] as List<CardEntity>
+        val catalog = values[0] as CatalogResults
         val totalCount = values[1] as Int
         val q = values[2] as String
         val colors = values[3] as Set<String>
@@ -129,32 +170,9 @@ class VaultViewModel(
         val cardArt = values[14] as Boolean
         val banner = values[15] as String?
 
-        val filtered = rawCards.filter { card ->
-            val cardColors = card.colorIdentity
-                .split(",")
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .toSet()
-
-            val matchesColors = if (colors.isEmpty()) {
-                true
-            } else {
-                val wantsColorless = "C" in colors
-                val wantedMana = colors - "C"
-                (wantsColorless && cardColors.isEmpty()) ||
-                    (wantedMana.isNotEmpty() && cardColors.any { it in wantedMana })
-            }
-
-            val matchesType = type == "All" || card.typeLine.contains(type, ignoreCase = true)
-            val matchesRarity = rarity == "All" || card.rarity.equals(rarity, ignoreCase = true)
-            val matchesBookmark = !bookmarked || card.isBookmarked
-            val matchesCmc = maxCmc == null || card.cmc <= maxCmc.toDouble()
-
-            matchesColors && matchesType && matchesRarity && matchesBookmark && matchesCmc
-        }
-
         VaultUiState(
-            cards = filtered,
+            cards = catalog.cards,
+            hasMoreCards = catalog.hasMore,
             totalVaultCount = totalCount,
             query = q,
             selectedColors = colors,
@@ -178,10 +196,12 @@ class VaultViewModel(
     )
 
     fun setQuery(newQuery: String) {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         query.value = newQuery
     }
 
     fun toggleColor(color: String) {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         selectedColors.value = if (color in selectedColors.value) {
             selectedColors.value - color
         } else {
@@ -190,22 +210,27 @@ class VaultViewModel(
     }
 
     fun setTypeFilter(type: String) {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         selectedType.value = type
     }
 
     fun setRarityFilter(rarity: String) {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         selectedRarity.value = rarity
     }
 
     fun toggleBookmarkedOnly() {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         bookmarkedOnly.value = !bookmarkedOnly.value
     }
 
     fun setMaxCmc(cmc: Int?) {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         maxCmcFilter.value = cmc
     }
 
     fun clearFilters() {
+        catalogLimit.value = CATALOG_PAGE_SIZE
         query.value = ""
         selectedColors.value = emptySet()
         selectedType.value = "All"
@@ -295,8 +320,11 @@ class VaultViewModel(
 
     fun deleteCustomCard(cardId: String) {
         viewModelScope.launch {
-            cardRepository.deleteCustomCard(cardId)
-            statusBanner.value = "Deleted custom card."
+            statusBanner.value = if (cardRepository.deleteCustomCard(cardId)) {
+                "Deleted custom card."
+            } else {
+                "Card was not deleted. Remove it from any decks or collections first."
+            }
         }
     }
 
@@ -311,7 +339,8 @@ class VaultViewModel(
             try {
                 val report = cardRepository.importDelverCsv(
                     csvContent = csvContent,
-                    offlineOnlyMode = uiState.value.offlineOnlyMode
+                    offlineOnlyMode = uiState.value.offlineOnlyMode,
+                    requireExactPrinting = true
                 )
                 csvImportReport.value = report
                 val name = collectionName.trim()

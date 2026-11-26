@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import com.example.BuildConfig
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
 import com.example.domain.CardFaceInfo
@@ -67,7 +68,7 @@ interface ScryfallApi {
                 .readTimeout(15, TimeUnit.SECONDS)
                 .addInterceptor { chain ->
                     val request = chain.request().newBuilder()
-                        .header("User-Agent", "LatticeMTG-Android/1.0")
+                        .header("User-Agent", "LatticeMTG-Android/${BuildConfig.VERSION_NAME} (+https://github.com/Dreadpool-87/Lattice-MTG-app)")
                         .header("Accept", "application/json")
                         .build()
                     chain.proceed(request)
