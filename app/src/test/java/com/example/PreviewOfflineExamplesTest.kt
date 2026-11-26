@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36], application = Application::class)
 class PreviewOfflineExamplesTest {
     @Test
-    fun `bundled catalog resolves four test decklists offline without shipping them`() = runBlocking {
+    fun `preview adds four complete decks offline without replacing existing decks`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = PreferencesRepository(context)
         val database = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
@@ -46,23 +46,12 @@ class PreviewOfflineExamplesTest {
                 database.deckDao(),
                 CardRepository(database.cardDao(), ScryfallApi.create(), NetworkMonitor(context))
             )
-            assertTrue(context.assets.list("playtest-decks").isNullOrEmpty())
-            val paths = listOf(
-                "Casual-Orzhov-Lifegain.txt",
-                "Casual-Golgari-Midrange.txt",
-                "Commander-Klingon-Fury.txt",
-                "Commander-Multiverse-Reforged.txt"
-            )
-            paths.forEach { name ->
-                val commander = name.startsWith("Commander-")
-                val format = if (commander) "Commander" else "Casual"
-                val text = checkNotNull(javaClass.getResourceAsStream("/playtest-decks/$name"))
-                    .bufferedReader().use { it.readText() }
-                val imported = decks.importDeckFromText(name, format, text, offlineOnlyMode = true)
-                assertEquals(if (commander) 100 else 60, imported.totalCardsImported)
-            }
+            val personal = decks.createDeck("Personal deck", "Casual", "", emptyList())
+            assertEquals(4, PreviewTools.prepare(context, database, decks))
+            assertEquals(0, PreviewTools.prepare(context, database, decks))
+            assertEquals(5, database.deckDao().getDeckCount())
             assertEquals(initialCount, database.cardDao().getCardCount())
-            database.deckDao().observeAllDecksWithEntries().first().forEach { deck ->
+            decks.allDecks.first().filter { it.deck.id != personal }.forEach { deck ->
                 val commander = deck.deck.format == "Commander"
                 assertEquals(if (commander) 1 else 0, deck.commanderEntries.size)
                 assertEquals(if (commander) 99 else 60, deck.mainboardEntries.sumOf { it.entry.quantity })
@@ -75,6 +64,12 @@ class PreviewOfflineExamplesTest {
                     it.card.metadataStatus != CardMetadataStatus.UNRESOLVED
                 })
             }
+            val sample = decks.allDecks.first().first { it.deck.name == "Orzhov Lifegain" }
+            decks.deleteDeck(sample.deck.id)
+            assertEquals(0, PreviewTools.prepare(context, database, decks))
+            assertEquals(1, PreviewTools.prepare(context, database, decks, restore = true))
+            assertEquals(0, PreviewTools.prepare(context, database, decks, restore = true))
+            assertEquals(personal, decks.allDecks.first().first { it.deck.name == "Personal deck" }.deck.id)
         } finally {
             preferences.setOfflineOnlyMode(false)
             database.close()

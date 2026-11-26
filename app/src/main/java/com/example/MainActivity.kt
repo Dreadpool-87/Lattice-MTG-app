@@ -174,10 +174,11 @@ fun LatticeRootApp(container: AppContainer) {
     LaunchedEffect(offlineCatalog) {
         try {
             offlineCatalog.installBundledCatalog()
+            container.preparePreview()
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            snackbarHostState.showSnackbar("Could not prepare the included card catalog.")
+            snackbarHostState.showSnackbar("Could not finish preparing the included data.")
         }
     }
     LaunchedEffect(currentRoute) {
@@ -367,7 +368,8 @@ fun LatticeRootApp(container: AppContainer) {
                             onBack = { navController.popBackStack() },
                             onOpenAbout = { navController.navigate(Routes.ABOUT) },
                             offlineCatalog = offlineCatalog,
-                            offlineArtwork = container.offlineArtwork
+                            offlineArtwork = container.offlineArtwork,
+                            previewSettings = if (BuildConfig.DEBUG) ({ container.PreviewSettings() }) else null
                         )
                     }
 
