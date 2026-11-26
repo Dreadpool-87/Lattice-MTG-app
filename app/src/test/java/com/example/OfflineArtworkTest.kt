@@ -87,7 +87,7 @@ class OfflineArtworkTest {
                 .body(image.toResponseBody("image/jpeg".toMediaType())).build()
         }.build()
         val repository = OfflineArtworkRepository(context, database, preferences, catalog, client) { id ->
-            ScryfallCardDto(id, "Prepared card", imageUris = ScryfallImageUrisDto(normal = "front image"))
+            ScryfallCardDto(id = id, name = "Prepared card", imageUris = ScryfallImageUrisDto(normal = "front image"))
         }
         val split = StarterCards.cards.first().copy(
             id = "sf-$alternateId", scryfallId = alternateId, imageUri = null,
