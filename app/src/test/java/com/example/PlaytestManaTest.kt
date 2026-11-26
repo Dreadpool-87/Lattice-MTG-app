@@ -4,6 +4,7 @@ import com.example.data.local.StarterCards
 import com.example.domain.DeckAnalytics
 import com.example.domain.PlaytestMana
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -47,6 +48,22 @@ class PlaytestManaTest {
         val tower = card.copy(oracleText = "{T}: Add one mana of any color in your commander's color identity.")
         assertEquals(listOf(listOf("W"), listOf("B")), PlaytestMana.sourceChoices(tower, setOf("W", "B")))
         assertTrue(PlaytestMana.sourceChoices(tower).isEmpty())
+    }
+
+    @Test
+    fun `land pips distinguish follow-up effects and basic subtypes`() {
+        val land = StarterCards.cards.first().copy(typeLine = "Land")
+        val reef = land.copy(oracleText = "{T}: Add {C}.\n{T}: Add {U} or {R}. This land deals 1 damage to you.")
+        assertEquals(listOf(listOf("C")), PlaytestMana.sourceChoices(reef))
+        assertEquals(listOf(listOf("C"), listOf("U"), listOf("R")), PlaytestMana.sourceChoices(reef, includeManual = true))
+
+        val ancestry = land.copy(oracleText = "{T}: Add one mana of any color in your commander's color identity. When that mana is spent to cast an Elf, scry 1.")
+        assertEquals(listOf(listOf("G")), PlaytestMana.sourceChoices(ancestry, setOf("G")))
+
+        val chapel = land.copy(oracleText = "This land enters tapped unless you control a Plains or a Swamp.")
+        val plains = land.copy(typeLine = "Land — Plains")
+        assertTrue(PlaytestMana.entersTapped(chapel))
+        assertFalse(PlaytestMana.entersTapped(chapel, listOf(plains)))
     }
 
     @Test

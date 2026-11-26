@@ -1,6 +1,8 @@
 package com.example.data.repository
 
 import android.content.Context
+import com.example.PreviewLog
+import kotlinx.coroutines.CancellationException
 import androidx.room.withTransaction
 import com.example.data.local.LatticeDatabase
 import com.example.data.remote.ScryfallCardDto
@@ -105,6 +107,20 @@ class OfflineCatalogRepository(
         }
     }
 
+    internal suspend fun loadSetForImport(setCode: String) {
+        if (!setCode.matches(Regex("[a-z0-9]{1,12}"))) return
+        val id = "set-$setCode"
+        if (id in installed.first()) return
+        try {
+            val pack = (_manifest.value ?: check())?.packs?.firstOrNull { it.id == id } ?: return
+            download(pack)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            PreviewLog.record("Catalog", "Could not load $id for import (${error.javaClass.simpleName}).")
+        }
+    }
+
     suspend fun download(pack: OfflineCatalogPack) = mutex.withLock {
         val current = _manifest.value
         check(current?.packs?.contains(pack) == true) { "Check for card data updates again." }
@@ -143,6 +159,7 @@ class OfflineCatalogRepository(
             }
         }
         preferences.recordCatalogPack(pack.id, pack.sha256)
+        PreviewLog.record("Catalog", "Loaded ${pack.id}: ${pack.count} printings.")
     }
 
     private suspend fun fetch(pack: OfflineCatalogPack, file: File) = withContext(Dispatchers.IO) {

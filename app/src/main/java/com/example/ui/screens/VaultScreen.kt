@@ -36,6 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -64,33 +67,43 @@ import com.example.ui.components.CardInspectorSheet
 import com.example.data.repository.OfflineArtworkRepository
 import com.example.ui.components.ManaSymbolPip
 import com.example.ui.viewmodel.VaultViewModel
+import com.example.ui.viewmodel.DecksViewModel
+import com.example.PreviewLog
+import com.example.domain.VaultListCard
 
-private val cardTypeFilters = listOf("All", "Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land")
+internal val cardTypeFilters = listOf("All", "Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land")
 private val colorFilters = listOf("W", "U", "B", "R", "G", "C")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(
     viewModel: VaultViewModel,
     snackbarHostState: SnackbarHostState,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenCatalog: () -> Unit = {},
-    onBackFromCatalog: (() -> Unit)? = null,
-    newerCardData: Boolean = false
+    decksViewModel: DecksViewModel? = null,
+    onOpenDeck: (Long) -> Unit = {},
+    newerCardData: Boolean = false,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val collections by viewModel.collections.collectAsStateWithLifecycle()
-    val showCollections = onBackFromCatalog == null
-    if (!showCollections) {
-        DisposableEffect(viewModel) {
-            viewModel.setCatalogOpen(true)
-            onDispose { viewModel.setCatalogOpen(false) }
-        }
+    val tabs = if (decksViewModel != null) listOf("Collections", "Decks", "Catalog") else listOf("Collections", "Catalog")
+    var selectedTab by rememberSaveable { mutableStateOf("Collections") }
+    val showCollections = selectedTab == "Collections"
+    val showCatalog = selectedTab == "Catalog"
+    val showDecks = selectedTab == "Decks" && decksViewModel != null
+    DisposableEffect(viewModel, showCatalog) {
+        viewModel.setCatalogOpen(showCatalog)
+        onDispose { viewModel.setCatalogOpen(false) }
     }
+    LaunchedEffect(selectedTab) { PreviewLog.record("Vault", "Opened $selectedTab.") }
     var filtersExpanded by rememberSaveable { mutableStateOf(false) }
     var inspectedCard by remember { mutableStateOf<Pair<List<CardEntity>, CardEntity>?>(null) }
     var showCreateCardDialog by remember { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
+    var showDeckCsvImport by remember { mutableStateOf(false) }
+    var showCreateDeck by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.statusBanner) {
         val msg = uiState.statusBanner
@@ -110,12 +123,16 @@ fun VaultScreen(
                 .fillMaxSize()
         ) {
             MainTabHeader(
-                title = if (showCollections) stringResource(R.string.nav_vault_compact) else "Card catalog",
+                title = stringResource(R.string.nav_vault_compact),
                 onOpenSettings = onOpenSettings,
                 settingsTag = "open_settings_button_vault",
-                onBack = onBackFromCatalog,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
+            PrimaryTabRow(selectedTabIndex = tabs.indexOf(selectedTab).coerceAtLeast(0)) {
+                tabs.forEach { tab ->
+                    Tab(selected = selectedTab == tab, onClick = { selectedTab = tab }, text = { Text(tab) })
+                }
+            }
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
@@ -131,9 +148,15 @@ fun VaultScreen(
                             onClick = { showCsvImportDialog = true },
                             modifier = Modifier.testTag("open_csv_import_button")
                         ) { Text("Import CSV") }
-                        OutlinedButton(onClick = onOpenCatalog) { Text("Browse catalog") }
                     }
-                } else {
+                } else if (showDecks) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { showCreateDeck = true }) { Text("New deck") }
+                        OutlinedButton(onClick = { decksViewModel.clearCsvImport(); showDeckCsvImport = true }) {
+                            Text("Import CSV")
+                        }
+                    }
+                } else if (showCatalog) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -192,7 +215,8 @@ fun VaultScreen(
                         )
                         val active = uiState.selectedColors.size + listOf(
                             uiState.selectedType != "All", uiState.selectedRarity != "All",
-                            uiState.bookmarkedOnly, uiState.maxCmcFilter != null
+                            uiState.bookmarkedOnly, uiState.maxCmcFilter != null, uiState.multiColorOnly,
+                            uiState.commanderOnly
                         ).count { it }
                         FilterChip(
                             selected = filtersExpanded,
@@ -209,6 +233,18 @@ fun VaultScreen(
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState())
                         ) {
+                            FilterChip(
+                                selected = uiState.multiColorOnly,
+                                onClick = viewModel::toggleMultiColorOnly,
+                                label = { Text("Multicolor") },
+                                modifier = Modifier.testTag("vault_multicolor_filter")
+                            )
+                            FilterChip(
+                                selected = uiState.commanderOnly,
+                                onClick = viewModel::toggleCommanderOnly,
+                                label = { Text("Commander legal") },
+                                modifier = Modifier.testTag("vault_commander_filter")
+                            )
                             colorFilters.forEach { code ->
                                 val selected = code in uiState.selectedColors
                                 Surface(
@@ -272,16 +308,32 @@ fun VaultScreen(
                                     modifier = Modifier.testTag("type_filter_${type.lowercase()}")
                                 )
                             }
-                        }
-                        OutlinedButton(onClick = viewModel::clearFilters) {
-                            Text("Reset filters")
+                            TextButton(onClick = viewModel::clearFilters) { Text("Reset filters") }
                         }
                     }
                 }
             }
 
             if (showCollections) {
-                VaultCollections(collections, onOpenCard = { cards, card -> inspectedCard = cards to card })
+                val lists = remember(collections) {
+                    collections.map { (name, cards) ->
+                        VaultCardList(name, name, cards.map { VaultListCard(it.card, it.entry.quantity.toLong()) })
+                    }
+                }
+                VaultCardLists(lists, "Import a CSV to add a collection.",
+                    onOpenCard = { cards, card -> inspectedCard = cards to card }, offlineArtwork = offlineArtwork)
+            } else if (showDecks) {
+                val lists = remember(uiState.decks) {
+                    uiState.decks.map { deck ->
+                        val cards = deck.entries.groupBy { it.card.id }.values.map { copies ->
+                            VaultListCard(copies.first().card, copies.sumOf { it.entry.quantity.toLong() })
+                        }
+                        VaultCardList(deck.deck.id.toString(), deck.deck.name, cards, deck.deck.format, deck.deck.id)
+                    }
+                }
+                VaultCardLists(lists, "Create a deck or import a deck CSV.",
+                    onOpenCard = { cards, card -> inspectedCard = cards to card },
+                    offlineArtwork = offlineArtwork, onEditDeck = onOpenDeck)
             } else if (uiState.cards.isEmpty()) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -316,6 +368,7 @@ fun VaultScreen(
                     items(uiState.cards, key = { it.id }) { card ->
                         VaultCardRow(
                             card = card,
+                            offlineArtwork = offlineArtwork,
                             onClick = { inspectedCard = uiState.cards to card },
                             onToggleBookmark = { viewModel.toggleBookmark(card) }
                         )
@@ -331,7 +384,7 @@ fun VaultScreen(
             }
         }
 
-        if (!showCollections) {
+        if (showCatalog) {
             FloatingActionButton(
                 onClick = { showCreateCardDialog = true },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -347,7 +400,8 @@ fun VaultScreen(
     }
 
     inspectedCard?.let { (cards, card) ->
-        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards, allowAddToDeck = true)
+        CatalogCardInspector(viewModel, card, onDismiss = { inspectedCard = null }, cards = cards,
+            allowAddToDeck = true, offlineArtwork = offlineArtwork)
     }
 
     if (showCreateCardDialog) {
@@ -358,6 +412,32 @@ fun VaultScreen(
                 viewModel.createCustomCard(name, mana, cmc, type, oracle, colors, rarity, p, t, tags)
             }
         )
+    }
+
+    if (showDecks) {
+        if (showCreateDeck) {
+            CreateDeckDialog(
+                onDismiss = { showCreateDeck = false },
+                onCreate = { name, format, description, colors ->
+                    showCreateDeck = false
+                    decksViewModel.createDeck(name, format, description, colors, onOpenDeck)
+                }
+            )
+        }
+        if (showDeckCsvImport) {
+            val imported by decksViewModel.csvImport.collectAsStateWithLifecycle()
+            CsvImportDialog(
+                isImporting = imported.isImporting,
+                report = imported.report,
+                forDeck = true,
+                importError = imported.error,
+                onImportCsv = { csv, name, format, _ ->
+                    decksViewModel.importDeckCsv(name, format, csv) { showDeckCsvImport = false }
+                },
+                onClearReport = decksViewModel::clearCsvImport,
+                onDismiss = { showDeckCsvImport = false }
+            )
+        }
     }
 
     if (showCollections && showCsvImportDialog) {
@@ -383,7 +463,8 @@ internal fun CatalogCardInspector(
     initialCard: CardEntity,
     onDismiss: () -> Unit,
     cards: List<CardEntity> = listOf(initialCard),
-    allowAddToDeck: Boolean
+    allowAddToDeck: Boolean,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     var index by remember(initialCard.id, cards) {
         mutableStateOf(cards.indexOfFirst { it.id == initialCard.id })
@@ -406,6 +487,7 @@ internal fun CatalogCardInspector(
         decks = state.decks,
         isOnline = state.isOnline && !state.offlineOnlyMode,
         showCardArt = state.showCardArt,
+        offlineArtwork = offlineArtwork,
         onDismiss = {
             viewModel.cancelCardInspection()
             onDismiss()

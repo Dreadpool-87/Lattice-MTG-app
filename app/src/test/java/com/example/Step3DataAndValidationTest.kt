@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
@@ -12,6 +13,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pinch
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
@@ -20,6 +24,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
@@ -29,12 +34,16 @@ import com.example.data.local.DeckEntryWithCard
 import com.example.data.local.DeckWithEntries
 import com.example.data.local.DeckZones
 import com.example.data.local.StarterCards
+import com.example.data.repository.ArtworkQuality
+import com.example.data.repository.ArtworkSide
+import com.example.data.repository.OfflineArtworkRepository
 import com.example.domain.CardFaceInfo
 import com.example.domain.CardJsonCodec
 import com.example.domain.CardRulingInfo
 import com.example.domain.DeckAnalytics
 import com.example.ui.components.CardInspectorSheet
 import com.example.ui.theme.LatticeMtgTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -42,6 +51,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowDialog
+import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -211,7 +221,8 @@ class Step3DataAndValidationTest {
                     typeLine = "Creature — Human Insect",
                     oracleText = "Flying",
                     power = "3",
-                    toughness = "2"
+                    toughness = "2",
+                    imageUri = "https://cards.scryfall.io/normal/back/1/a/example.jpg"
                 )
             )
         )
@@ -269,8 +280,8 @@ class Step3DataAndValidationTest {
         }
 
         composeRule.onNodeWithTag("card_faces_section").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Face 1: Delver of Secrets").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Face 2: Insectile Aberration").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Front · Delver of Secrets").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Back · Insectile Aberration").performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithTag("card_legality_status").performScrollTo()
             .assertTextContains("Unknown", substring = true)
@@ -292,14 +303,23 @@ class Step3DataAndValidationTest {
         val starter = StarterCards.cards.first()
         val twoSided = starter.copy(
             name = "Two-sided test card",
+            scryfallId = "e09573a5-779b-482b-9349-c3bdba770d2c",
             imageUri = null,
             cardFacesJson = CardJsonCodec.encodeFaces(listOf(
-                CardFaceInfo("Front", imageUri = "https://example.invalid/front.jpg"),
-                CardFaceInfo("Back", imageUri = "https://example.invalid/back.jpg")
+                CardFaceInfo("Front"),
+                CardFaceInfo("Back")
             ))
         )
         val neighbor = starter.copy(id = "neighbor", name = "Neighbor test card", imageUri = null)
         val selected = mutableStateOf(twoSided)
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val artworkDirectory = File(context.filesDir, "offline-card-art").apply { mkdirs() }
+        ArtworkSide.entries.forEach { side ->
+            val filename = OfflineArtworkRepository.artworkFilename(twoSided.scryfallId, side, ArtworkQuality.SD)
+            context.resources.openRawResource(R.drawable.img_empty_deckbox).use { image ->
+                File(artworkDirectory, filename).outputStream().use { image.copyTo(it) }
+            }
+        }
 
         composeRule.setContent {
             LatticeMtgTheme {
@@ -325,9 +345,31 @@ class Step3DataAndValidationTest {
         details.performTouchInput { swipeRight() }
         composeRule.onNodeWithText("Show back").performScrollTo().performClick()
         composeRule.onNodeWithContentDescription("${twoSided.name} · back").performScrollTo().performClick()
-        composeRule.onNodeWithTag("sheet_enlarged_art").assertIsDisplayed()
+        val enlarged = composeRule.onNodeWithTag("sheet_enlarged_art").assertIsDisplayed()
+        enlarged.performTouchInput {
+            pinch(
+                start0 = center - Offset(width * 0.10f, 0f),
+                end0 = center - Offset(width * 0.30f, 0f),
+                start1 = center + Offset(width * 0.10f, 0f),
+                end1 = center + Offset(width * 0.30f, 0f)
+            )
+        }
+        val zoom = enlarged.fetchSemanticsNode().config[SemanticsProperties.StateDescription]
+        assertTrue(zoom.substringBefore('%').toInt() > 100)
+        enlarged.performTouchInput { swipeLeft() }
+        assertEquals(twoSided, selected.value)
         composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
         composeRule.onNodeWithText("Show front").assertIsDisplayed()
+
+        composeRule.onNodeWithContentDescription("${twoSided.name} · back").performScrollTo().performClick()
+        enlarged.performTouchInput { swipeLeft() }
+        composeRule.onNodeWithText("${neighbor.name} · No image available").assertIsDisplayed()
+        enlarged.performTouchInput { swipeRight() }
+        enlarged.assertIsDisplayed()
+        assertEquals(twoSided, selected.value)
+        assertEquals("100% zoom", enlarged.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
+        composeRule.onNodeWithContentDescription("Close enlarged image").performClick()
+        composeRule.onNodeWithText("Show back").performScrollTo().assertIsDisplayed()
     }
     @Test
     @Config(sdk = [36], qualifiers = "w360dp-h640dp")

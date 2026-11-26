@@ -10,12 +10,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.FlipToBack
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.ImageNotSupported
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,6 +46,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.repository.ArtworkSide
+import com.example.data.repository.OfflineArtworkRepository
+import com.example.domain.CardJsonCodec
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
 import com.example.ui.components.ManaCostRow
@@ -51,7 +61,8 @@ import com.example.ui.components.RarityPill
 fun VaultCardRow(
     card: CardEntity,
     onClick: () -> Unit,
-    onToggleBookmark: () -> Unit
+    onToggleBookmark: () -> Unit,
+    offlineArtwork: OfflineArtworkRepository? = null
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -81,6 +92,7 @@ fun VaultCardRow(
                     )
                     ManaCostRow(manaCost = card.manaCost, pipSize = 16.dp)
                 }
+                OfflineImageBadge(card, offlineArtwork)
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = card.typeLine,
@@ -291,5 +303,55 @@ fun CreateCustomCardDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
+    )
+}
+
+
+@Composable
+internal fun OfflineImageBadge(card: CardEntity, repository: OfflineArtworkRepository?) {
+    if (repository == null) return
+    val context = LocalContext.current
+    val revision by repository.localImageRevision.collectAsStateWithLifecycle()
+    val frontSaved = remember(context, card.scryfallId, revision) {
+        OfflineArtworkRepository.localFile(context, card.scryfallId, ArtworkSide.FRONT) != null
+    }
+    val backSaved = remember(context, card.scryfallId, revision) {
+        OfflineArtworkRepository.localFile(context, card.scryfallId, ArtworkSide.BACK) != null
+    }
+    val hasBackSide = remember(repository, card, revision) { repository.hasBackSide(card) }
+    val hasMultipleTextParts = remember(card.cardFacesJson) {
+        CardJsonCodec.decodeFaces(card.cardFacesJson).size > 1
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (hasBackSide) {
+            Icon(
+                Icons.Outlined.FlipToBack,
+                contentDescription = "Double-sided card",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        } else if (hasMultipleTextParts) {
+            Icon(
+                Icons.Outlined.Description,
+                contentDescription = "Multiple rules text sections",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        OfflineImageIcon(frontSaved, if (hasBackSide) "Front image" else "Card image")
+        if (hasBackSide) OfflineImageIcon(backSaved, "Back image")
+    }
+}
+
+@Composable
+private fun OfflineImageIcon(saved: Boolean, label: String) {
+    Icon(
+        imageVector = if (saved) Icons.Outlined.Image else Icons.Outlined.ImageNotSupported,
+        contentDescription = if (saved) "$label saved offline" else "$label not saved offline",
+        tint = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.size(16.dp)
     )
 }

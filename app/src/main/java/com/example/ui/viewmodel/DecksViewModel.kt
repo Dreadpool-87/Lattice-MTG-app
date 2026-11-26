@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.PreviewLog
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.DeckWithEntries
@@ -114,6 +115,7 @@ class DecksViewModel(
         viewModelScope.launch {
             val id = deckRepository.createDeck(name, format, description, colors)
             statusMessage.value = "Created \"$name\" offline in Room."
+            PreviewLog.record("Decks", "Created deck ($format).")
             onCreated(id)
         }
     }
@@ -122,6 +124,7 @@ class DecksViewModel(
         viewModelScope.launch {
             val copied = deckRepository.duplicateDeck(deckId)
             if (copied != null) {
+                PreviewLog.record("Decks", "Duplicated deck.")
                 statusMessage.value = "Deck duplicated locally."
             }
         }
@@ -130,6 +133,7 @@ class DecksViewModel(
     fun deleteDeck(deckId: Long, name: String) {
         viewModelScope.launch {
             deckRepository.deleteDeck(deckId)
+            PreviewLog.record("Decks", "Deleted deck.")
             statusMessage.value = "Deleted \"$name\"."
         }
     }
@@ -169,6 +173,7 @@ class DecksViewModel(
             try {
                 val report = cardRepository.importDelverCsv(csvText, uiState.value.offlineOnlyMode)
                 val deckId = deckRepository.addVerifiedCsvToNewDeck(name, format, report)
+                PreviewLog.record("Decks", "CSV reviewed; deck saved: ${deckId != null}.")
                 if (deckId == null) {
                     _csvImport.value = DeckCsvImportState(
                         report = report,
@@ -188,7 +193,8 @@ class DecksViewModel(
                 throw cancelled
             } catch (error: CsvLookupException) {
                 _csvImport.value = DeckCsvImportState(error = error.message)
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                PreviewLog.record("Decks", "CSV import failed (${error.javaClass.simpleName}).")
                 _csvImport.value = DeckCsvImportState(error = "Could not import the CSV deck. Please try again.")
             }
         }

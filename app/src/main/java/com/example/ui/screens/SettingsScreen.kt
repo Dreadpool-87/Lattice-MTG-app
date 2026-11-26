@@ -73,7 +73,8 @@ fun SettingsScreen(
     onOpenAbout: () -> Unit,
     modifier: Modifier = Modifier,
     offlineCatalog: com.example.data.repository.OfflineCatalogRepository? = null,
-    offlineArtwork: com.example.data.repository.OfflineArtworkRepository? = null
+    offlineArtwork: com.example.data.repository.OfflineArtworkRepository? = null,
+    previewSettings: (@Composable () -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showResetPrefsDialog by remember { mutableStateOf(false) }
@@ -123,6 +124,9 @@ fun SettingsScreen(
             ) {
                 if (!com.example.BuildConfig.APPLICATION_ID.endsWith(".preview")) {
                     item { AppUpdateSettings() }
+                }
+                if (previewSettings != null) {
+                    item { previewSettings() }
                 }
                 if (offlineCatalog != null) {
                     item { OfflineCatalogSettings(offlineCatalog, uiState.offlineOnlyMode) }

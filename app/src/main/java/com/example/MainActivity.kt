@@ -81,7 +81,6 @@ object Routes {
     const val DECKS = "decks"
     const val SYNERGY = "synergy"
     const val VAULT = "vault"
-    const val VAULT_CATALOG = "vault/catalog"
     const val FACE_TO_FACE = "face_to_face"
     const val TABLETOP = "tabletop"
     const val SETTINGS = "settings"
@@ -174,14 +173,16 @@ fun LatticeRootApp(container: AppContainer) {
     LaunchedEffect(offlineCatalog) {
         try {
             offlineCatalog.installBundledCatalog()
+            container.preparePreview()
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            snackbarHostState.showSnackbar("Could not prepare the included card catalog.")
+            snackbarHostState.showSnackbar("Could not finish preparing the included data.")
         }
     }
     LaunchedEffect(currentRoute) {
-        if (currentRoute in setOf(Routes.VAULT, Routes.VAULT_CATALOG, Routes.SETTINGS)) {
+        currentRoute?.let { PreviewLog.record("Navigation", "Opened $it") }
+        if (currentRoute in setOf(Routes.VAULT, Routes.SETTINGS)) {
             try {
                 offlineCatalog.check()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -329,19 +330,12 @@ fun LatticeRootApp(container: AppContainer) {
                     composable(Routes.VAULT) {
                         VaultScreen(
                             viewModel = vaultViewModel,
+                            offlineArtwork = container.offlineArtwork,
                             snackbarHostState = snackbarHostState,
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                            onOpenCatalog = { navController.navigate(Routes.VAULT_CATALOG) },
+                            decksViewModel = decksViewModel,
+                            onOpenDeck = { deckId -> navController.navigate(Routes.deckDetail(deckId)) },
                             newerCardData = newerCardData
-                        )
-                    }
-
-                    composable(Routes.VAULT_CATALOG) {
-                        VaultScreen(
-                            viewModel = vaultViewModel,
-                            snackbarHostState = snackbarHostState,
-                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                            onBackFromCatalog = { navController.popBackStack() }
                         )
                     }
 
@@ -365,7 +359,8 @@ fun LatticeRootApp(container: AppContainer) {
                             onBack = { navController.popBackStack() },
                             onOpenAbout = { navController.navigate(Routes.ABOUT) },
                             offlineCatalog = offlineCatalog,
-                            offlineArtwork = container.offlineArtwork
+                            offlineArtwork = container.offlineArtwork,
+                            previewSettings = if (BuildConfig.DEBUG) ({ container.PreviewSettings() }) else null
                         )
                     }
 
@@ -391,10 +386,12 @@ fun LatticeRootApp(container: AppContainer) {
                         )
                         DeckDetailScreen(
                             viewModel = detailVm,
+                            offlineArtwork = container.offlineArtwork,
                             snackbarHostState = snackbarHostState,
                             onBack = { navController.popBackStack() },
                             cardInspector = { cards, card, close ->
-                                CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards, allowAddToDeck = false)
+                                CatalogCardInspector(vaultViewModel, card, onDismiss = close, cards = cards,
+                                    allowAddToDeck = false, offlineArtwork = container.offlineArtwork)
                             },
                             onOpenSynergyAnalyzer = { id ->
                                 synergyViewModel.selectDeck(id)

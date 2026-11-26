@@ -16,7 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class AppContainer(application: Application) {
+class AppContainer(private val application: Application) {
     private val database by lazy { LatticeDatabase.getInstance(application) }
     val networkMonitor by lazy { NetworkMonitor(application) }
     val preferencesRepository by lazy { PreferencesRepository(application) }
@@ -29,7 +29,8 @@ class AppContainer(application: Application) {
         CardRepository(
             cardDao = database.cardDao(),
             scryfallApi = scryfallApi,
-            networkMonitor = networkMonitor
+            networkMonitor = networkMonitor,
+            offlineCatalog = offlineCatalog
         )
     }
 
@@ -39,6 +40,11 @@ class AppContainer(application: Application) {
             cardRepository = cardRepository
         )
     }
+
+    suspend fun preparePreview() = PreviewTools.prepare(application, database, deckRepository)
+
+    @androidx.compose.runtime.Composable
+    fun PreviewSettings() = PreviewTools.Settings(application, database, deckRepository, offlineCatalog)
 
     suspend fun ensureSeeded() = seedStarterCatalogIfEmpty(database.cardDao())
 }
@@ -57,6 +63,8 @@ class LatticeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        PreviewLog.initialize(this)
+        PreviewLog.record("App", "Started version ${BuildConfig.VERSION_CODE}.")
         container = AppContainer(this)
         appScope.launch {
             container.ensureSeeded()

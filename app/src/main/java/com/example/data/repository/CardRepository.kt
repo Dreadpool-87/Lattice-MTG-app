@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.PreviewLog
 import com.example.data.local.CardDao
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
@@ -25,7 +26,8 @@ sealed class SyncResult {
 class CardRepository(
     private val cardDao: CardDao,
     private val scryfallApi: ScryfallApi,
-    private val networkMonitor: NetworkMonitor
+    private val networkMonitor: NetworkMonitor,
+    private val offlineCatalog: OfflineCatalogRepository? = null
 ) {
     val allCards: Flow<List<CardEntity>> = cardDao.observeAllCards()
     val cardCount: Flow<Int> = cardDao.observeCardCount()
@@ -37,9 +39,11 @@ class CardRepository(
         bookmarkedOnly: Boolean,
         maxCmc: Int?,
         colors: Set<String>,
-        limit: Int
+        limit: Int,
+        multiColorOnly: Boolean = false,
+        commanderOnly: Boolean = false
     ): Flow<List<CardEntity>> = cardDao.searchCards(
-        query.trim(), type, rarity, bookmarkedOnly, maxCmc, colors.joinToString(""), limit
+        query.trim(), type, rarity, bookmarkedOnly, maxCmc, colors.joinToString(""), limit, multiColorOnly, commanderOnly
     )
 
     fun observeCard(cardId: String): Flow<CardEntity?> = cardDao.observeCardById(cardId)
@@ -100,13 +104,23 @@ class CardRepository(
     ): DelverImportReport {
         val parsedRows = withContext(Dispatchers.Default) { DelverCsvImporter.parseCsv(csvContent) }
         val canFetchOnline = !offlineOnlyMode && networkMonitor.isCurrentlyOnline()
+        PreviewLog.record("CSV", "Review started: ${parsedRows.size} rows; online lookup allowed: $canFetchOnline.")
         return DelverCsvImporter.matchAndImportRows(
             rows = parsedRows,
             cardDao = cardDao,
             scryfallApi = scryfallApi,
             canFetchOnline = canFetchOnline,
-            requireExactPrinting = requireExactPrinting
-        )
+            requireExactPrinting = requireExactPrinting,
+            loadPrintingSet = offlineCatalog?.let { catalog -> catalog::loadSetForImport },
+            keepLocalOnLookupError = true
+        ).also { report ->
+            PreviewLog.record(
+                "CSV",
+                "Verified ${report.verifiedRows.size}; conflicts ${report.conflictRows.size}; unresolved ${report.unresolvedRows.size}; " +
+                    "online lookup interrupted: ${report.lookupNotice != null}."
+            )
+            report.lookupNotice?.let { PreviewLog.record("CSV lookup", it) }
+        }
     }
 
     suspend fun getPrintingVariants(card: CardEntity): List<CardEntity> {

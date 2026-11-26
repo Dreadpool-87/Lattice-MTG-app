@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36], application = Application::class)
 class PreviewOfflineExamplesTest {
     @Test
-    fun `bundled catalog resolves four test decklists offline without shipping them`() = runBlocking {
+    fun `preview adds four complete decks offline without replacing existing decks`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = PreferencesRepository(context)
         val database = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
@@ -46,23 +46,17 @@ class PreviewOfflineExamplesTest {
                 database.deckDao(),
                 CardRepository(database.cardDao(), ScryfallApi.create(), NetworkMonitor(context))
             )
-            assertTrue(context.assets.list("playtest-decks").isNullOrEmpty())
-            val paths = listOf(
-                "Casual-Orzhov-Lifegain.txt",
-                "Casual-Golgari-Midrange.txt",
-                "Commander-Klingon-Fury.txt",
-                "Commander-Multiverse-Reforged.txt"
-            )
-            paths.forEach { name ->
-                val commander = name.startsWith("Commander-")
-                val format = if (commander) "Commander" else "Casual"
-                val text = checkNotNull(javaClass.getResourceAsStream("/playtest-decks/$name"))
-                    .bufferedReader().use { it.readText() }
-                val imported = decks.importDeckFromText(name, format, text, offlineOnlyMode = true)
-                assertEquals(if (commander) 100 else 60, imported.totalCardsImported)
-            }
-            assertEquals(initialCount, database.cardDao().getCardCount())
-            database.deckDao().observeAllDecksWithEntries().first().forEach { deck ->
+            val personal = decks.createDeck("Personal deck", "Casual", "", emptyList())
+            val legacyList = context.assets.open("playtest-decks/Commander-Multiverse-Reforged.txt")
+                .bufferedReader().use { it.readText() }
+                .replace(Regex(""" \((FRC|FRA)\) \d+"""), "")
+            val oldMultiverse = decks.importDeckFromText("Legacy fixture", "Commander", legacyList, true).deckId
+            assertEquals(4, PreviewTools.prepare(context, database, decks))
+            assertEquals(0, PreviewTools.prepare(context, database, decks))
+            assertEquals(6, database.deckDao().getDeckCount())
+            assertEquals(initialCount + 66, database.cardDao().getCardCount())
+            val exact = decks.allDecks.first().first { it.deck.name == "Multiverse Reforged" }
+            decks.allDecks.first().filter { it.deck.id != personal }.forEach { deck ->
                 val commander = deck.deck.format == "Commander"
                 assertEquals(if (commander) 1 else 0, deck.commanderEntries.size)
                 assertEquals(if (commander) 99 else 60, deck.mainboardEntries.sumOf { it.entry.quantity })
@@ -75,6 +69,33 @@ class PreviewOfflineExamplesTest {
                     it.card.metadataStatus != CardMetadataStatus.UNRESOLVED
                 })
             }
+            val expected = mapOf("Swords to Plowshares" to "37", "Battlefield Forge" to "65", "Path of Ancestry" to "77")
+            for ((name, number) in expected) {
+                val card = exact.mainboardEntries.single { it.card.name == name }.card
+                assertEquals("FRC", card.setCode)
+                assertEquals(number, card.collectorNumber)
+            }
+            assertEquals(mapOf("281" to 2, "282" to 2), exact.mainboardEntries
+                .filter { it.card.name == "Plains" }.associate { it.card.collectorNumber to it.entry.quantity })
+
+            val dao = database.deckDao()
+            val legacy = checkNotNull(dao.getDeckWithEntriesOnce(oldMultiverse))
+            assertEquals("40K", legacy.mainboardEntries.single { it.card.name == "Path of Ancestry" }.card.setCode)
+            decks.deleteDeck(exact.deck.id)
+            dao.updateDeck(legacy.deck.copy(name = "Multiverse Reforged", notes = "Keep my notes"))
+            check(context.getSharedPreferences("preview_tools", Context.MODE_PRIVATE).edit()
+                .remove("multiverse_printings_prepared").commit())
+            assertEquals(0, PreviewTools.prepare(context, database, decks))
+            val upgraded = checkNotNull(dao.getDeckWithEntriesOnce(oldMultiverse))
+            assertEquals("Keep my notes", upgraded.deck.notes)
+            assertEquals(exact.entries.map { Triple(it.entry.zone, it.card.scryfallId, it.entry.quantity) }.toSet(),
+                upgraded.entries.map { Triple(it.entry.zone, it.card.scryfallId, it.entry.quantity) }.toSet())
+            val sample = decks.allDecks.first().first { it.deck.name == "Orzhov Lifegain" }
+            decks.deleteDeck(sample.deck.id)
+            assertEquals(0, PreviewTools.prepare(context, database, decks))
+            assertEquals(1, PreviewTools.prepare(context, database, decks, restore = true))
+            assertEquals(0, PreviewTools.prepare(context, database, decks, restore = true))
+            assertEquals(personal, decks.allDecks.first().first { it.deck.name == "Personal deck" }.deck.id)
         } finally {
             preferences.setOfflineOnlyMode(false)
             database.close()

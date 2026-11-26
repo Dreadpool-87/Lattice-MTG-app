@@ -7,7 +7,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -38,17 +40,19 @@ import com.example.data.repository.DeckRepository
 import com.example.data.repository.NetworkMonitor
 import com.example.data.repository.PreferencesRepository
 import com.example.domain.CsvRowMatchStatus
-import com.example.domain.CsvLookupException
 import com.example.domain.DelverCsvImporter
 import com.example.ui.screens.VaultScreen
 import com.example.ui.screens.DecksScreen
 import com.example.ui.screens.DeckDetailScreen
+import com.example.ui.screens.PlaytestGoldfishTab
 import com.example.ui.screens.CatalogCardInspector
 import com.example.ui.theme.LatticeMtgTheme
 import com.example.ui.theme.WubrgTheme
 import com.example.ui.viewmodel.VaultViewModel
 import com.example.ui.viewmodel.DecksViewModel
 import com.example.ui.viewmodel.DeckDetailViewModel
+import com.example.ui.viewmodel.BattlefieldPermanent
+import com.example.ui.viewmodel.PlaytestHandState
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -148,6 +152,66 @@ class Step2ImportAndMigrationTest {
     }
 
     @Test
+    fun `playtest groups manual effects and opens a separate action log`() {
+        val card = StarterCards.cards.first()
+        var extraDraws = 0
+        var turns = 0
+        composeRule.setContent {
+            LatticeMtgTheme {
+                PlaytestGoldfishTab(
+                    playtest = PlaytestHandState(
+                        library = listOf(card),
+                        hand = listOf(card),
+                        battlefield = listOf(BattlefieldPermanent(1, card)),
+                        actionLog = listOf("Dealt opening hand.")
+                    ),
+                    onDealSeven = {},
+                    onMulligan = {},
+                    onDrawCard = { extraDraws++ },
+                    onPlayCard = {},
+                    onPutBottom = {},
+                    onNextTurn = { turns++ }
+                )
+            }
+        }
+        composeRule.onNodeWithText("Battlefield (1)").assertIsDisplayed()
+        composeRule.onNodeWithText("Hand (1)").assertIsDisplayed()
+        composeRule.onNodeWithTag("playtest_draw_button").assertDoesNotExist()
+        composeRule.onNodeWithTag("playtest_lazy_list").performScrollToNode(hasTestTag("playtest_next_turn_button"))
+        composeRule.onNodeWithTag("playtest_next_turn_button").performClick()
+        composeRule.onNodeWithTag("playtest_card_effects_button").performClick()
+        composeRule.onNodeWithTag("playtest_draw_button").performClick()
+        composeRule.onNodeWithTag("playtest_draw_button").assertDoesNotExist()
+        composeRule.onNodeWithTag("playtest_lazy_list").performScrollToNode(hasTestTag("playtest_action_log_button"))
+        composeRule.onNodeWithTag("playtest_action_log_button").performClick()
+        composeRule.onNodeWithText("Dealt opening hand.").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(1, turns)
+            assertEquals(1, extraDraws)
+        }
+    }
+
+    @Test
+    fun `playtest marks spells payable only while the matching source is available`() {
+        val island = StarterCards.cards.first().copy(name = "Island", typeLine = "Basic Land — Island", oracleText = "")
+        val spell = island.copy(name = "Test spell", typeLine = "Instant", manaCost = "{U}")
+        val land = BattlefieldPermanent(1, island, tapped = true)
+        val state = mutableStateOf(PlaytestHandState(hand = listOf(spell), battlefield = listOf(land)))
+        composeRule.setContent {
+            LatticeMtgTheme {
+                PlaytestGoldfishTab(
+                    playtest = state.value,
+                    onDealSeven = {}, onMulligan = {}, onDrawCard = {}, onPlayCard = {}, onPutBottom = {}
+                )
+            }
+        }
+        composeRule.onNodeWithText("Need mana").assertIsNotEnabled()
+        composeRule.onNodeWithText("Produces").assertIsDisplayed()
+        composeRule.runOnIdle { state.value = state.value.copy(battlefield = listOf(land.copy(tapped = false))) }
+        composeRule.onNodeWithText("Cast").assertIsEnabled()
+    }
+
+    @Test
     fun `ambiguous deck names require a printing and ownership needs printing evidence`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
@@ -236,7 +300,7 @@ class Step2ImportAndMigrationTest {
     }
 
     @Test
-    fun `rate limited CSV lookup is reported as a service error`() = runTest {
+    fun `rate limiting preserves local CSV matches and reports the unavailable row`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
             .allowMainThreadQueries().build()
@@ -245,12 +309,36 @@ class Step2ImportAndMigrationTest {
                 override fun isCurrentlyOnline() = true
             }
             val failure = HttpException(Response.error<ScryfallCardDto>(429, "".toResponseBody()))
-            val repo = CardRepository(db.cardDao(), createAbandonAttachmentsApi(remoteLookupFailure = failure), monitor)
-            val error = runCatching {
-                repo.importDelverCsv("Quantity,Name,Set\n1,Refute,FDN", offlineOnlyMode = false)
-            }.exceptionOrNull()
-            assertTrue(error is CsvLookupException)
-            assertTrue(error?.message.orEmpty().contains("rate limiting"))
+            val api = createAbandonAttachmentsApi(remoteLookupFailure = failure)
+            db.cardDao().storeCatalogPrinting(api.getCardBySetNumber("tla", "205").toCardEntity())
+            val repo = CardRepository(db.cardDao(), api, monitor)
+            val report = repo.importDelverCsv(
+                "Quantity,Name,Set,Collector Number\n1,Refute,FDN,\n2,Abandon Attachments,TLA,205",
+                offlineOnlyMode = false
+            )
+            assertEquals(1, report.verifiedRows.size)
+            assertEquals(2, report.totalVerifiedCopies)
+            assertEquals(1, report.unresolvedRows.size)
+            assertTrue(report.lookupNotice.orEmpty().contains("rate limiting"))
+            val exact = api.getCardBySetNumber("tla", "205").copy(
+                id = "53a4e402-2c9f-439f-9e12-6c7af5cc6200",
+                name = "Set package match",
+                set = "fdn",
+                collectorNumber = "77"
+            ).toCardEntity()
+            val packReview = DelverCsvImporter.matchAndImportRows(
+                rows = DelverCsvImporter.parseCsv("Quantity,Name,Set,Collector Number\n1,Set package match,FDN,77"),
+                cardDao = db.cardDao(),
+                scryfallApi = null,
+                canFetchOnline = true,
+                requireExactPrinting = true,
+                loadPrintingSet = { set ->
+                    assertEquals("fdn", set)
+                    db.cardDao().storeCatalogPrinting(exact)
+                },
+                keepLocalOnLookupError = true
+            )
+            assertEquals(exact.scryfallId, packReview.verifiedRows.single().resolvedCard?.scryfallId)
         } finally {
             db.close()
         }
@@ -616,6 +704,27 @@ class Step2ImportAndMigrationTest {
     }
 
     @Test
+    fun catalogCommanderFilterUsesCachedFormatLegality() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java).build()
+        try {
+            val dao = db.cardDao()
+            val legal = StarterCards.cards.first().copy(id = "legal", scryfallId = "legal", legalFormats = "Vintage, Commander")
+            dao.upsertAllPreservingState(listOf(
+                legal,
+                legal.copy(id = "banned", scryfallId = "banned", legalFormats = "Vintage"),
+                legal.copy(id = "unknown", scryfallId = "unknown", legalFormats = "Unknown"),
+                legal.copy(id = "custom", scryfallId = "", isCustom = true)
+            ))
+
+            val cards = dao.searchCards("", "All", "All", false, null, "", 10, commanderOnly = true).first()
+            assertEquals(listOf("legal"), cards.map { it.id })
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
     fun `vault preserves filters when opening and dismissing card details and runs csv import ui`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, LatticeDatabase::class.java)
@@ -637,22 +746,25 @@ class Step2ImportAndMigrationTest {
             runBlocking { deckRepo.createDeck("Offline test deck", "Modern", "", emptyList()) }
             val prefs = PreferencesRepository(context)
             val viewModel = VaultViewModel(cardRepo, deckRepo, onlineMonitor, prefs, db.vaultCollectionDao())
+            val deckModel = DecksViewModel(deckRepo, cardRepo, onlineMonitor, prefs)
+            val solRing = StarterCards.cards.first { it.name == "Sol Ring" }
+            runBlocking {
+                val deckId = deckRepo.allDecks.first().single().deck.id
+                db.deckDao().insertEntries(listOf(DeckEntryEntity(deckId = deckId, cardId = solRing.id, quantity = 1)))
+            }
 
             composeRule.setContent {
                 LatticeMtgTheme {
                     val snackbarHostState = remember { SnackbarHostState() }
-                    val catalog = remember { androidx.compose.runtime.mutableStateOf(false) }
                     VaultScreen(
                         viewModel = viewModel,
                         snackbarHostState = snackbarHostState,
                         onOpenSettings = {},
-                        onOpenCatalog = { catalog.value = true },
-                        onBackFromCatalog = if (catalog.value) ({ catalog.value = false }) else null
+                        decksViewModel = deckModel
                     )
                 }
             }
 
-            val solRing = StarterCards.cards.first { it.name == "Sol Ring" }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 viewModel.uiState.value.decks.isNotEmpty()
             }
@@ -660,7 +772,22 @@ class Step2ImportAndMigrationTest {
             assertTrue(viewModel.uiState.value.cards.isEmpty())
             composeRule.onNodeWithTag("vault_search_input").assertDoesNotExist()
             composeRule.onNodeWithTag("open_csv_import_button").assertIsDisplayed()
-            composeRule.onNodeWithText("Browse catalog").performClick()
+            composeRule.onNodeWithText("Decks").performClick()
+            composeRule.onNodeWithTag("decks_list").assertDoesNotExist()
+            composeRule.onNodeWithText("Offline test deck").performClick()
+            composeRule.onNodeWithText("Find a card or set").assertIsDisplayed()
+            composeRule.onNodeWithTag("collection_group_menu").performClick()
+            composeRule.onNodeWithText("Color").performClick()
+            composeRule.onNodeWithText("Sol Ring").assertDoesNotExist()
+            val personalList = composeRule.onNodeWithTag("vault_personal_card_lists")
+            personalList.performScrollToNode(hasText("Colorless"))
+            composeRule.onNodeWithText("Colorless").performClick()
+            personalList.performScrollToNode(hasText("Sol Ring"))
+            composeRule.onNodeWithText("Sol Ring").assertIsDisplayed()
+            personalList.performScrollToNode(hasText("Colorless"))
+            composeRule.onNodeWithText("Colorless").performClick()
+            composeRule.onNodeWithText("Sol Ring").assertDoesNotExist()
+            composeRule.onNodeWithText("Catalog").performClick()
             composeRule.onNodeWithTag("open_csv_import_button").assertDoesNotExist()
             composeRule.onNodeWithTag("type_filter_artifact").assertDoesNotExist()
             composeRule.onNodeWithTag("vault_catalog_filters").performClick()
@@ -691,7 +818,7 @@ class Step2ImportAndMigrationTest {
             assertEquals("Artifact", viewModel.uiState.value.selectedType)
             composeRule.onNodeWithTag("vault_card_${solRing.id}").assertIsDisplayed()
 
-            composeRule.onNodeWithContentDescription("Back to collections").performClick()
+            composeRule.onNodeWithText("Collections").performClick()
             // Clear filters and verify CSV Import dialog flow
             viewModel.clearFilters()
             composeRule.waitForIdle()

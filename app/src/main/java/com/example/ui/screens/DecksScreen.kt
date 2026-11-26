@@ -72,6 +72,12 @@ import com.example.ui.components.ManaSymbolPip
 import com.example.ui.components.MainTabHeader
 import com.example.ui.viewmodel.DecksViewModel
 
+private enum class DeckSort(val label: String) {
+    RECENT("Recently edited"),
+    NAME("A–Z"),
+    SIZE("Most cards")
+}
+
 private val deckFormats = listOf("All", "Commander", "Modern", "Standard", "Pioneer", "Pauper", "Casual")
 
 @Composable
@@ -89,6 +95,14 @@ fun DecksScreen(
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
     var deckToDelete by remember { mutableStateOf<DeckEntity?>(null) }
+    var sort by rememberSaveable { mutableStateOf(DeckSort.RECENT) }
+    val orderedDecks = remember(uiState.decks, sort) {
+        when (sort) {
+            DeckSort.RECENT -> uiState.decks
+            DeckSort.NAME -> uiState.decks.sortedBy { it.deck.name.lowercase() }
+            DeckSort.SIZE -> uiState.decks.sortedByDescending { it.playableCount }
+        }
+    }
 
     LaunchedEffect(uiState.statusMessage) {
         val msg = uiState.statusMessage
@@ -152,6 +166,14 @@ fun DecksScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(stringResource(R.string.action_import_deck))
                         }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.clearCsvImport(); showCsvImportDialog = true },
+                            enabled = !importingDeck
+                        ) { Text("Import CSV") }
+                        CollectionOrderMenu("Sort", sort, DeckSort.entries, DeckSort::label, { sort = it })
                     }
 
                     OutlinedTextField(
@@ -228,7 +250,7 @@ fun DecksScreen(
                     }
                 }
             } else {
-                items(uiState.decks, key = { it.deck.id }) { deckItem ->
+                items(orderedDecks, key = { it.deck.id }) { deckItem ->
                     DeckListCard(
                         deckWithEntries = deckItem,
                         onOpen = { onOpenDeck(deckItem.deck.id) },
@@ -455,7 +477,7 @@ private fun DeckListCard(
 }
 
 @Composable
-private fun CreateDeckDialog(
+internal fun CreateDeckDialog(
     onDismiss: () -> Unit,
     onCreate: (String, String, String, List<String>) -> Unit
 ) {

@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.PreviewLog
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.CardEntity
@@ -51,6 +52,19 @@ data class PlaytestHandState(
     val landsInHand: Int = 0,
     val actionLog: List<String> = emptyList()
 )
+
+internal fun PlaytestHandState.commanderTax(commander: CardEntity): Int =
+    2 * commanderCasts.getOrDefault(commander.id, 0)
+
+internal fun PlaytestHandState.availableManaSources(): List<PlaytestMana.Source> =
+    battlefield.mapNotNull { permanent ->
+        val hasHaste = permanent.card.keywords.split(',').any { it.trim().equals("Haste", ignoreCase = true) }
+        val summoningSick = permanent.enteredOnTurn == turnNumber &&
+            PlaytestMana.isCreature(permanent.card) && !hasHaste
+        if (permanent.tapped || summoningSick) return@mapNotNull null
+        val choices = PlaytestMana.sourceChoices(permanent.card, commanderColors)
+        if (choices.isEmpty()) null else PlaytestMana.Source(permanent.instanceId, choices)
+    }
 
 data class DeckDetailUiState(
     val deckWithEntries: DeckWithEntries? = null,
@@ -166,6 +180,7 @@ class DeckDetailViewModel(
 
     // === Offline Goldfish Playtest Simulator ===
     fun startNewTestHand(isMulligan: Boolean = false) {
+        PreviewLog.record("Playtest", "Opening hand requested; mulligan: $isMulligan.")
         val deck = uiState.value.deckWithEntries ?: return
         val expandedPool = deck.mainboardEntries.flatMap { entryWithCard ->
             List(entryWithCard.entry.quantity) { entryWithCard.card }
@@ -206,6 +221,7 @@ class DeckDetailViewModel(
     }
 
     fun drawCard() {
+        PreviewLog.record("Playtest", "Draw requested.")
         val current = playtestState.value
         if (current.scryCard != null) return
         if (current.library.isEmpty()) {
@@ -223,6 +239,7 @@ class DeckDetailViewModel(
     }
 
     fun nextTurn() {
+        PreviewLog.record("Playtest", "Next turn requested.")
         val current = playtestState.value
         if (current.scryCard != null) return
         val untapped = current.battlefield.map { it.copy(tapped = false) }
@@ -262,6 +279,7 @@ class DeckDetailViewModel(
     }
 
     fun playCardFromHand(index: Int) {
+        PreviewLog.record("Playtest", "Hand card play requested.")
         val current = playtestState.value
         if (index !in current.hand.indices) return
         val card = current.hand[index]
@@ -287,7 +305,7 @@ class DeckDetailViewModel(
                 actionLog = (listOf("Cast ${card.name} → Graveyard.") + current.actionLog).take(12)
             )
         } else {
-            val permanent = newPermanent(card, current.turnNumber)
+            val permanent = newPermanent(card, current)
             playtestState.value = current.copy(
                 hand = nextHand,
                 battlefield = paidBattlefield + permanent,
@@ -300,14 +318,15 @@ class DeckDetailViewModel(
     }
 
     fun castCommander(index: Int) {
+        PreviewLog.record("Playtest", "Commander cast requested.")
         val current = playtestState.value
         if (index !in current.commandZone.indices) return
         val commander = current.commandZone[index]
         val nextCommandZone = current.commandZone.toMutableList().apply { removeAt(index) }
         if (!openingHandIsReady(current)) return
         val priorCasts = current.commanderCasts.getOrDefault(commander.id, 0)
-        val payment = payForCast(current, commander, tax = priorCasts * 2) ?: return
-        val permanent = newPermanent(commander, current.turnNumber)
+        val payment = payForCast(current, commander, tax = current.commanderTax(commander)) ?: return
+        val permanent = newPermanent(commander, current)
         val nextTaxCount = priorCasts + 1
         playtestState.value = current.copy(
             commandZone = nextCommandZone,
@@ -324,11 +343,11 @@ class DeckDetailViewModel(
         return false
     }
 
-    private fun newPermanent(card: CardEntity, turn: Int) = BattlefieldPermanent(
+    private fun newPermanent(card: CardEntity, state: PlaytestHandState) = BattlefieldPermanent(
         instanceId = nextInstanceId++,
         card = card,
-        tapped = PlaytestMana.entersTapped(card),
-        enteredOnTurn = turn
+        tapped = PlaytestMana.entersTapped(card, state.battlefield.map { it.card }),
+        enteredOnTurn = state.turnNumber
     )
 
     private fun payForCast(state: PlaytestHandState, card: CardEntity, tax: Int = 0): PlaytestMana.Payment? {
@@ -338,15 +357,7 @@ class DeckDetailViewModel(
             return null
         }
 
-        val sources = state.battlefield.mapNotNull { permanent ->
-            val hasHaste = permanent.card.keywords.split(',').any { it.trim().equals("Haste", ignoreCase = true) }
-            val summoningSick = permanent.enteredOnTurn == state.turnNumber &&
-                PlaytestMana.isCreature(permanent.card) && !hasHaste
-            if (permanent.tapped || summoningSick) return@mapNotNull null
-            val choices = PlaytestMana.sourceChoices(permanent.card, state.commanderColors)
-            if (choices.isEmpty()) null else PlaytestMana.Source(permanent.instanceId, choices)
-        }
-        return PlaytestMana.pay(cost, state.manaPool, sources).also {
+        return PlaytestMana.pay(cost, state.manaPool, state.availableManaSources()).also {
             if (it == null) snackbarMessage.value = "Not enough available mana of the required types."
         }
     }

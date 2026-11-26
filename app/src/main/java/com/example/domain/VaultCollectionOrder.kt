@@ -2,7 +2,6 @@ package com.example.domain
 
 import com.example.data.local.CardEntity
 import com.example.data.local.CardMetadataStatus
-import com.example.data.local.VaultCollectionCard
 import java.util.Locale
 
 internal enum class VaultCollectionSort(val label: String) {
@@ -20,9 +19,11 @@ internal enum class VaultCollectionGrouping(val label: String) {
     COLOR_AND_TYPE("Color + type")
 }
 
+internal data class VaultListCard(val card: CardEntity, val quantity: Long)
+
 internal data class VaultCollectionGroup(
     val heading: String?,
-    val entries: List<VaultCollectionCard>
+    val entries: List<VaultListCard>
 )
 
 internal object VaultCollectionOrder {
@@ -55,17 +56,17 @@ internal object VaultCollectionOrder {
     }
 
     fun arrange(
-        entries: List<VaultCollectionCard>,
+        entries: List<VaultListCard>,
         sort: VaultCollectionSort,
         grouping: VaultCollectionGrouping
     ): List<VaultCollectionGroup> {
-        val name = compareBy<VaultCollectionCard> { it.card.name.lowercase(Locale.ROOT) }
+        val name = compareBy<VaultListCard> { it.card.name.lowercase(Locale.ROOT) }
         val comparator = when (sort) {
             VaultCollectionSort.NAME_ASC -> name
             VaultCollectionSort.NAME_DESC -> name.reversed()
-            VaultCollectionSort.QUANTITY_DESC -> compareByDescending<VaultCollectionCard> { it.entry.quantity }.then(name)
-            VaultCollectionSort.QUANTITY_ASC -> compareBy<VaultCollectionCard> { it.entry.quantity }.then(name)
-            VaultCollectionSort.MANA_VALUE_ASC -> compareBy<VaultCollectionCard> {
+            VaultCollectionSort.QUANTITY_DESC -> compareByDescending<VaultListCard> { it.quantity }.then(name)
+            VaultCollectionSort.QUANTITY_ASC -> compareBy<VaultListCard> { it.quantity }.then(name)
+            VaultCollectionSort.MANA_VALUE_ASC -> compareBy<VaultListCard> {
                 it.card.metadataStatus == CardMetadataStatus.UNRESOLVED
             }.thenBy { it.card.cmc }.then(name)
         }

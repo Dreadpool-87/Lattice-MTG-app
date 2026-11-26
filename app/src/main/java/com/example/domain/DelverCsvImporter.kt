@@ -45,7 +45,8 @@ data class DelverImportReport(
     val savedCardsCount: Int,
     val totalVerifiedCopies: Int,
     val collectionName: String? = null,
-    val collectionNotice: String? = null
+    val collectionNotice: String? = null,
+    val lookupNotice: String? = null
 )
 
 object DelverCsvImporter {
@@ -193,10 +194,14 @@ object DelverCsvImporter {
         cardDao: CardDao,
         scryfallApi: ScryfallApi?,
         canFetchOnline: Boolean,
-        requireExactPrinting: Boolean = false
+        requireExactPrinting: Boolean = false,
+        loadPrintingSet: (suspend (String) -> Unit)? = null,
+        keepLocalOnLookupError: Boolean = false
     ): DelverImportReport {
         val checkedRows = mutableListOf<DelverRowResolution>()
-        val candidates = mutableMapOf<DelverCsvRow, CardEntity>()
+        val candidates = mutableMapOf<DelverCsvRow, CardEntity?>()
+        val checkedSets = mutableSetOf<String>()
+        var lookupNotice: String? = null
 
         for (row in rows) {
             if (row.quantity <= 0) {
@@ -224,12 +229,28 @@ object DelverCsvImporter {
             }
 
             val lookup = row.copy(rowNumber = 0, rawLine = "", quantity = 0)
-            val candidate = candidates[lookup] ?: findExactCandidate(
-                row = row,
-                cardDao = cardDao,
-                scryfallApi = scryfallApi,
-                canFetchOnline = canFetchOnline
-            )?.also { candidates[lookup] = it }
+            val candidate = if (lookup in candidates) candidates[lookup] else {
+                var local = findExactCandidate(row, cardDao, null, canFetchOnline = false)
+                if (canFetchOnline && (local == null || verifySuppliedFields(row, local).isNotEmpty())) {
+                    val set = row.setCode?.lowercase()
+                    if (set != null && loadPrintingSet != null && checkedSets.add(set)) {
+                        loadPrintingSet(set)
+                        local = findExactCandidate(row, cardDao, null, canFetchOnline = false)
+                    }
+                    if (lookupNotice == null && (local == null || local.metadataStatus != CardMetadataStatus.VERIFIED ||
+                            (row.scryfallId == null && verifySuppliedFields(row, local).isNotEmpty()))
+                    ) {
+                        local = try {
+                            findExactCandidate(row, cardDao, scryfallApi, canFetchOnline = true) ?: local
+                        } catch (error: CsvLookupException) {
+                            if (!keepLocalOnLookupError) throw error
+                            lookupNotice = error.message ?: "Online printing verification is unavailable."
+                            local
+                        }
+                    }
+                }
+                local.also { candidates[lookup] = it }
+            }
 
             if (candidate == null) {
                 val hint = when {
@@ -294,7 +315,8 @@ object DelverCsvImporter {
             conflictRows = conflicts,
             unresolvedRows = unresolved,
             savedCardsCount = verified.mapNotNull { it.resolvedCard?.id }.distinct().size,
-            totalVerifiedCopies = totalCopies
+            totalVerifiedCopies = totalCopies,
+            lookupNotice = lookupNotice
         )
     }
 
@@ -327,11 +349,6 @@ object DelverCsvImporter {
             if (localExact != null) return localExact
 
             val localSetNum = cardDao.findBySetAndCollector(row.setCode, row.collectorNumber)
-            if (localSetNum.isNotEmpty()) {
-                return localSetNum.firstOrNull { it.lang.equals(lang, ignoreCase = true) }
-                    ?: localSetNum.first()
-            }
-
             if (canFetchOnline && scryfallApi != null) {
                 val remote = if (row.language != null) {
                     fetchRemoteSafe {
@@ -351,7 +368,7 @@ object DelverCsvImporter {
                 }
                 if (remote != null) return remote
             }
-            return null
+            return localSetNum.firstOrNull()
         }
 
         // Search the supplied set before considering a name match verified.

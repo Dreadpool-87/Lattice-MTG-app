@@ -25,6 +25,7 @@ class PreferencesRepository(private val context: Context) {
         val PLAYER_COUNT = intPreferencesKey("player_count")
         val WUBRG_THEME = stringPreferencesKey("wubrg_theme")
         val THEME_BRIGHTNESS = stringPreferencesKey("theme_brightness")
+        val ARTWORK_QUALITY = stringPreferencesKey("artwork_quality")
         val SHOW_CARD_ART = booleanPreferencesKey("show_card_art")
         val KEEP_SCREEN_AWAKE = booleanPreferencesKey("keep_screen_awake")
     }
@@ -51,6 +52,14 @@ class PreferencesRepository(private val context: Context) {
     val wubrgTheme: Flow<WubrgTheme> = appearance.map { it.theme }
     val themeBrightnessMode: Flow<ThemeBrightnessMode> =
         appearance.map { it.brightness }
+
+    val artworkQuality: Flow<ArtworkQuality> = context.latticeDataStore.data.map { prefs ->
+        ArtworkQuality.entries.firstOrNull { it.name == prefs[Keys.ARTWORK_QUALITY] } ?: ArtworkQuality.SD
+    }
+
+    suspend fun setArtworkQuality(quality: ArtworkQuality) {
+        context.latticeDataStore.edit { it[Keys.ARTWORK_QUALITY] = quality.name }
+    }
 
     val showCardArt: Flow<Boolean> = context.latticeDataStore.data.map { prefs ->
         prefs[Keys.SHOW_CARD_ART] ?: true

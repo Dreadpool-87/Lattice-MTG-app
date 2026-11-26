@@ -7,6 +7,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,10 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -56,12 +55,53 @@ import androidx.compose.ui.unit.dp
 import com.example.data.local.CardEntity
 import com.example.domain.PlaytestMana
 import com.example.ui.components.ManaCostRow
+import com.example.ui.components.ManaSymbolPip
 import com.example.ui.theme.BurnishedGold
 import com.example.ui.theme.LatticeSparkContainer
 import com.example.ui.theme.LatticeSparkGreen
 import com.example.ui.viewmodel.PlaytestDestination
 import com.example.ui.viewmodel.PlaytestHandState
+import com.example.ui.viewmodel.availableManaSources
+import com.example.ui.viewmodel.commanderTax
 
+private enum class SpellAvailability(val label: String) {
+    READY("Cast"), NEED_MANA("Need mana"), UNSUPPORTED("Unsupported cost"), MULLIGAN("Finish mulligan")
+}
+
+private fun spellAvailability(
+    manaCost: String,
+    tax: Int,
+    pendingBottoms: Int,
+    pool: List<String>,
+    sources: List<PlaytestMana.Source>
+): SpellAvailability {
+    if (pendingBottoms > 0) return SpellAvailability.MULLIGAN
+    val cost = PlaytestMana.cost(manaCost, tax) ?: return SpellAvailability.UNSUPPORTED
+    return if (PlaytestMana.pay(cost, pool, sources) != null) SpellAvailability.READY else SpellAvailability.NEED_MANA
+}
+
+@Composable
+private fun PlaytestLandMana(card: CardEntity, commanderColors: Set<String>) {
+    val (automatic, other) = remember(card, commanderColors) {
+        val automatic = PlaytestMana.sourceChoices(card, commanderColors).flatten().distinct()
+        val other = PlaytestMana.sourceChoices(card, commanderColors, includeManual = true)
+            .flatten().distinct() - automatic.toSet()
+        automatic to other
+    }
+    if (automatic.isNotEmpty()) PlaytestManaPips("Produces", automatic)
+    if (other.isNotEmpty()) PlaytestManaPips("With effect", other)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PlaytestManaPips(label: String, symbols: List<String>) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, modifier = Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        symbols.forEach { ManaSymbolPip(symbol = it, size = 19.dp, modifier = Modifier.align(Alignment.CenterVertically)) }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlaytestGoldfishTab(
     playtest: PlaytestHandState,
@@ -84,6 +124,7 @@ fun PlaytestGoldfishTab(
 ) {
     var showGraveyardExile by remember { mutableStateOf(false) }
     var showActionLog by remember { mutableStateOf(false) }
+    var showCardEffects by remember { mutableStateOf(false) }
 
     val hasSession = playtest.hand.isNotEmpty() ||
         playtest.battlefield.isNotEmpty() ||
@@ -93,13 +134,268 @@ fun PlaytestGoldfishTab(
         playtest.scryCard != null ||
         playtest.library.isNotEmpty()
     val pendingBottoms = (playtest.mulliganCount - playtest.bottomedThisMulligan).coerceAtLeast(0)
+    val manaSources = remember(playtest.battlefield, playtest.turnNumber, playtest.commanderColors) {
+        playtest.availableManaSources()
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier.testTag("playtest_lazy_list")
     ) {
-        // 1. Goldfish Control & Telemetry Header
+        if (hasSession) {
+            item {
+                val tappedCount = playtest.battlefield.count { it.tapped }
+                Text(
+                    text = "Battlefield (${playtest.battlefield.size}${if (tappedCount > 0) " • $tappedCount tapped" else ""})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                if (playtest.battlefield.isEmpty()) {
+                    Text("No permanents in play", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            items(playtest.battlefield, key = { it.instanceId }) { permanent ->
+                var menuExpanded by remember { mutableStateOf(false) }
+                Surface(
+                    color = if (permanent.tapped) {
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (permanent.tapped) MaterialTheme.colorScheme.outline else LatticeSparkGreen.copy(alpha = 0.35f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onTogglePermanentTapped(permanent.instanceId) }
+                        .testTag("playtest_battlefield_${permanent.instanceId}")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+                    ) {
+                        Surface(
+                            color = if (permanent.tapped) MaterialTheme.colorScheme.outlineVariant else LatticeSparkContainer,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = if (permanent.tapped) "TAPPED" else "UNTAPPED",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (permanent.tapped) MaterialTheme.colorScheme.onSurfaceVariant else LatticeSparkGreen,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(permanent.card) }) {
+                            Text(
+                                text = permanent.card.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = permanent.card.typeLine,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (PlaytestMana.isLand(permanent.card)) {
+                                PlaytestLandMana(permanent.card, playtest.commanderColors)
+                            }
+                        }
+                        ManaCostRow(manaCost = permanent.card.manaCost, pipSize = 19.dp)
+                        Box {
+                            IconButton(
+                                onClick = { menuExpanded = true },
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "Move permanent")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Send to Graveyard") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.GRAVEYARD)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Exile") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.EXILE)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Return to Hand") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.HAND)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Return to Command Zone") },
+                                    enabled = permanent.card.id in playtest.commanderIds,
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.COMMAND_ZONE)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (playtest.commanderIds.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Command Zone (${playtest.commandZone.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = BurnishedGold
+                        )
+                    }
+                    if (playtest.commandZone.isEmpty()) {
+                        Text("No commander in this zone", style = MaterialTheme.typography.bodySmall)
+                    }
+                    playtest.commandZone.forEachIndexed { idx, commander ->
+                        val tax = playtest.commanderTax(commander)
+                        val availability = remember(commander.manaCost, tax, pendingBottoms, playtest.manaPool, manaSources) {
+                            spellAvailability(commander.manaCost, tax, pendingBottoms, playtest.manaPool, manaSources)
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, BurnishedGold.copy(alpha = 0.55f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(commander) }) {
+                                    Text(
+                                        text = commander.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = if (tax == 0) commander.typeLine else "Commander tax: +{$tax}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    ManaCostRow(manaCost = commander.manaCost, pipSize = 19.dp)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onCastCommander(idx) },
+                                    enabled = availability == SpellAvailability.READY,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("playtest_cast_commander_$idx")
+                                ) {
+                                    Text(availability.label, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (pendingBottoms > 0) {
+            item {
+                Text("London mulligan · Put $pendingBottoms card(s) on the bottom to keep this hand.",
+                    style = MaterialTheme.typography.bodySmall, color = BurnishedGold)
+            }
+        }
+        if (hasSession) {
+            item {
+                Text(
+                    text = "Hand (${playtest.hand.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            items(playtest.hand.size) { index ->
+                val card = playtest.hand[index]
+                val isLand = PlaytestMana.isLand(card)
+                val availability = remember(card.manaCost, pendingBottoms, playtest.manaPool, manaSources) {
+                    spellAvailability(card.manaCost, 0, pendingBottoms, playtest.manaPool, manaSources)
+                }
+                val canPlay = if (isLand) pendingBottoms == 0 && playtest.landsPlayedThisTurn == 0
+                    else availability == SpellAvailability.READY
+                val action = when {
+                    !isLand -> availability.label
+                    canPlay -> "Play land"
+                    else -> "Land played"
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (canPlay) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(card) }) {
+                            Text(
+                                text = card.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = card.typeLine,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (isLand) PlaytestLandMana(card, playtest.commanderColors)
+                            else ManaCostRow(manaCost = card.manaCost, pipSize = 19.dp)
+                        }
+                        if (pendingBottoms > 0) TextButton(
+                            onClick = { onPutBottom(index) },
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Text("Bottom", style = MaterialTheme.typography.labelSmall)
+                        } else Button(
+                            onClick = { onPlayCard(index) },
+                            enabled = canPlay,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Text(action, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -107,131 +403,42 @@ fun PlaytestGoldfishTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Playtest",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = if (!hasSession) {
-                                "Draw an opening hand to begin."
-                            } else {
-                                "Turn ${playtest.turnNumber} • Library ${playtest.library.size} • Lands ${playtest.landsPlayedThisTurn} • Mulligans ${playtest.mulliganCount}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
+                    Text(if (hasSession) "Turn ${playtest.turnNumber}" else "Playtest",
+                        style = MaterialTheme.typography.titleMedium)
                     if (hasSession) {
-                        Text(
-                            if (playtest.manaPool.isEmpty()) "Casting automatically taps supported mana sources."
-                            else "Mana pool: " + playtest.manaPool.joinToString(" ") { "{$it}" },
+                        Text("Library ${playtest.library.size} · Land drops ${playtest.landsPlayedThisTurn} · Mulligans ${playtest.mulliganCount}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    if (pendingBottoms > 0 && playtest.hand.isNotEmpty()) {
-                        Surface(
-                            color = BurnishedGold.copy(alpha = 0.16f),
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, BurnishedGold.copy(alpha = 0.55f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "London Mulligan: Tap 'Bottom' on $pendingBottoms card(s) to finish keeping.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = BurnishedGold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                            )
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (playtest.manaPool.isNotEmpty()) {
+                            Text("Mana pool: " + playtest.manaPool.joinToString(" ") { "{$it}" },
+                                style = MaterialTheme.typography.bodySmall)
                         }
                     }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    ) {
-                        Button(
-                            onClick = onDealSeven,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("playtest_deal_button")
-                        ) {
-                            Text(if (!hasSession) "Draw 7" else "New Hand", maxLines = 1)
-                        }
-                        OutlinedButton(
-                            onClick = onMulligan,
-                            enabled = hasSession,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("playtest_mulligan_button")
-                        ) {
-                            Text("Mulligan", maxLines = 1)
-                        }
-                        OutlinedButton(
-                            onClick = onDrawCard,
-                            enabled = playtest.library.isNotEmpty() && playtest.scryCard == null,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("playtest_draw_button")
-                        ) {
-                            Text("Draw", maxLines = 1)
-                        }
-                    }
-
-                    if (hasSession) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                        ) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (hasSession) {
                             Button(
                                 onClick = onNextTurn,
-                                enabled = playtest.scryCard == null,
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("playtest_next_turn_button")
-                            ) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Next Turn", maxLines = 1)
-                            }
+                                enabled = playtest.scryCard == null && pendingBottoms == 0,
+                                modifier = Modifier.testTag("playtest_next_turn_button")
+                            ) { Text("Next Turn") }
                             OutlinedButton(
-                                onClick = onUntapAll,
-                                enabled = playtest.battlefield.any { it.tapped },
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("playtest_untap_all_button")
-                            ) {
-                                Text("Untap All", maxLines = 1)
-                            }
-                            OutlinedButton(
-                                onClick = onScryTop,
-                                enabled = playtest.library.isNotEmpty() && playtest.scryCard == null,
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("playtest_scry_button")
-                            ) {
-                                Icon(Icons.Filled.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Scry 1", maxLines = 1)
-                            }
-                            OutlinedButton(
-                                onClick = onShuffleLibrary,
-                                enabled = playtest.library.size > 1 && playtest.scryCard == null,
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("playtest_shuffle_button")
-                            ) {
-                                Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Shuffle", maxLines = 1)
-                            }
+                                onClick = { showCardEffects = true },
+                                enabled = playtest.scryCard == null && pendingBottoms == 0,
+                                modifier = Modifier.testTag("playtest_card_effects_button")
+                            ) { Text("Card effects") }
+                            TextButton(onClick = { showActionLog = true },
+                                modifier = Modifier.testTag("playtest_action_log_button")) { Text("Action log") }
+                        }
+                        val handButton = Modifier.testTag("playtest_deal_button")
+                        if (hasSession) {
+                            TextButton(onClick = onDealSeven, modifier = handButton) { Text("New Hand") }
+                            TextButton(onClick = onMulligan,
+                                modifier = Modifier.testTag("playtest_mulligan_button")) { Text("Mulligan") }
+                        } else {
+                            Button(onClick = onDealSeven, modifier = handButton) { Text("Draw 7") }
                         }
                     }
                 }
@@ -295,244 +502,6 @@ fun PlaytestGoldfishTab(
                                     .testTag("playtest_scry_bottom")
                             ) {
                                 Text("Put on Bottom")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Command Zone (for Commander decks)
-        if (playtest.commanderIds.isNotEmpty()) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Command Zone (${playtest.commandZone.size})",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = BurnishedGold
-                        )
-                    }
-                    playtest.commandZone.forEachIndexed { idx, commander ->
-                        val tax = 2 * playtest.commanderCasts.getOrDefault(commander.id, 0)
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, BurnishedGold.copy(alpha = 0.55f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(commander) }) {
-                                    Text(
-                                        text = commander.name,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = commander.typeLine,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                ManaCostRow(manaCost = commander.manaCost, pipSize = 14.dp)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = { onCastCommander(idx) },
-                                    modifier = Modifier
-                                        .height(48.dp)
-                                        .testTag("playtest_cast_commander_$idx")
-                                ) {
-                                    Text(if (tax == 0) "Cast" else "Cast +{$tax}")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Hand
-        if (playtest.hand.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Hand (${playtest.hand.size})",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            items(playtest.hand.size) { index ->
-                val card = playtest.hand[index]
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(card) }) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = card.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
-                                ManaCostRow(manaCost = card.manaCost, pipSize = 15.dp)
-                            }
-                            Text(
-                                text = card.typeLine,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (card.oracleText.isNotBlank()) {
-                                Text(
-                                    card.oracleText.replace('\n', ' '),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        if (pendingBottoms > 0) TextButton(
-                            onClick = { onPutBottom(index) },
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Text("Bottom", style = MaterialTheme.typography.labelSmall)
-                        }
-                        Button(
-                            onClick = { onPlayCard(index) },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Text(if (PlaytestMana.isLand(card)) "Play land" else "Cast", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. Battlefield (Tap / Untap + Zone Move Menu)
-        if (playtest.battlefield.isNotEmpty()) {
-            item {
-                val tappedCount = playtest.battlefield.count { it.tapped }
-                Text(
-                    text = "Battlefield (${playtest.battlefield.size}${if (tappedCount > 0) " • $tappedCount tapped" else ""})",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-            }
-            items(playtest.battlefield, key = { it.instanceId }) { permanent ->
-                var menuExpanded by remember { mutableStateOf(false) }
-                Surface(
-                    color = if (permanent.tapped) {
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)
-                    } else {
-                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (permanent.tapped) MaterialTheme.colorScheme.outline else LatticeSparkGreen.copy(alpha = 0.35f)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onTogglePermanentTapped(permanent.instanceId) }
-                        .testTag("playtest_battlefield_${permanent.instanceId}")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
-                    ) {
-                        Surface(
-                            color = if (permanent.tapped) MaterialTheme.colorScheme.outlineVariant else LatticeSparkContainer,
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = if (permanent.tapped) "TAPPED" else "UNTAPPED",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (permanent.tapped) MaterialTheme.colorScheme.onSurfaceVariant else LatticeSparkGreen,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f).clickable(onClickLabel = "Read card details") { onInspectCard(permanent.card) }) {
-                            Text(
-                                text = permanent.card.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = permanent.card.typeLine,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        ManaCostRow(manaCost = permanent.card.manaCost, pipSize = 14.dp)
-                        Box {
-                            IconButton(
-                                onClick = { menuExpanded = true },
-                                modifier = Modifier.minimumInteractiveComponentSize()
-                            ) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "Move permanent")
-                            }
-                            DropdownMenu(
-                                expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Send to Graveyard") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.GRAVEYARD)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Exile") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.EXILE)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Return to Hand") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.HAND)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Return to Command Zone") },
-                                    enabled = permanent.card.id in playtest.commanderIds,
-                                    onClick = {
-                                        menuExpanded = false
-                                        onMoveBattlefieldCard(permanent.instanceId, PlaytestDestination.COMMAND_ZONE)
-                                    }
-                                )
                             }
                         }
                     }
@@ -607,51 +576,56 @@ fun PlaytestGoldfishTab(
             }
         }
 
-        // 7. Recent Goldfish Action Log
-        if (playtest.actionLog.isNotEmpty()) {
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showActionLog = !showActionLog }
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Action Log (${playtest.actionLog.size})",
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                            Text(
-                                text = if (showActionLog) "Hide" else "Show",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        AnimatedVisibility(visible = showActionLog) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(top = 6.dp)
-                            ) {
-                                playtest.actionLog.forEach { entry ->
-                                    Text(
-                                        text = "• $entry",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
+    }
+
+    if (showCardEffects) {
+        val close = { showCardEffects = false }
+        AlertDialog(
+            onDismissRequest = close,
+            title = { Text("Card effects") },
+            text = {
+                Column {
+                    Text("Apply an effect from a card you played.", style = MaterialTheme.typography.bodySmall)
+                    TextButton(
+                        onClick = { close(); onDrawCard() },
+                        enabled = playtest.library.isNotEmpty(),
+                        modifier = Modifier.testTag("playtest_draw_button")
+                    ) { Text("Draw for card effect") }
+                    TextButton(
+                        onClick = { close(); onScryTop() },
+                        enabled = playtest.library.isNotEmpty(),
+                        modifier = Modifier.testTag("playtest_scry_button")
+                    ) { Text("Scry 1") }
+                    TextButton(
+                        onClick = { close(); onShuffleLibrary() },
+                        enabled = playtest.library.size > 1,
+                        modifier = Modifier.testTag("playtest_shuffle_button")
+                    ) { Text("Shuffle library") }
+                    TextButton(
+                        onClick = { close(); onUntapAll() },
+                        enabled = playtest.battlefield.any { it.tapped },
+                        modifier = Modifier.testTag("playtest_untap_all_button")
+                    ) { Text("Untap all permanents") }
+                }
+            },
+            confirmButton = { TextButton(onClick = close) { Text("Close") } }
+        )
+    }
+
+    if (showActionLog) {
+        val close = { showActionLog = false }
+        AlertDialog(
+            onDismissRequest = close,
+            title = { Text("Action log") },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(playtest.actionLog) { entry ->
+                        Text(entry, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            }
-        }
+            },
+            confirmButton = { TextButton(onClick = close) { Text("Close") } }
+        )
     }
 }
 
